@@ -35,7 +35,7 @@
 
 // #define SFUD_USING_FAST_READ
 
-#define SFUD_USING_FLASH_INFO_TABLE
+// #define SFUD_USING_FLASH_INFO_TABLE
 
 enum {
     SFUD_DEVICE_INDEX = 0,
@@ -43,7 +43,7 @@ enum {
 
 #define SFUD_FLASH_DEVICE_TABLE                                                \
 {                                                                              \
-    [SFUD_DEVICE_INDEX] = {.name = "zd25wq16", .spi.name = "SPI2"},           \
+    [SFUD_DEVICE_INDEX] = {.name = "Nor", .spi.name = "SPI2"},           \
 }
 
 //#define SFUD_USING_QSPI

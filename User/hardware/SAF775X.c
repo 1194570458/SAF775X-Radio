@@ -884,9 +884,11 @@ void TunerInit(void)
 	SetTuner();
 	SetTunerOPT();
 	SetRadioDSP();
+  SetFMStereo(sys->Config.nFMST);
 	SetRadioSignal();
 	SetRadioAutoBW(1,2);
-	
+	SetSoftMute(sys->Config.nSoftMute[sys->Radio.nRFMode]);
+  
 	TuneFreq(sys->Radio.nBandFreq[sys->Radio.nBandMode], Preset);
 }
 

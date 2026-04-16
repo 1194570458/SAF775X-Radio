@@ -741,8 +741,10 @@ void DispPic(uint8_t page, uint8_t column, uint16_t x ,uint8_t y ,const unsigned
  */
 void DispContrast(uint16_t contrast)
 {
-  if(contrast<85 || contrast > 360)
+  if(contrast<200 || contrast>300) {  // limit contrast range
+    DispContrast(265); // Back to normal value when illegal
     return;
+  }
   uint8_t temp[2] = {0};
   temp[0] = (uint8_t)contrast&0x3F;
   temp[1] = (uint8_t)(contrast>>6)&0x07;

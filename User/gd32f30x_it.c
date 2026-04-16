@@ -195,23 +195,6 @@ void ADC0_1_IRQHandler(void)
 */
 void RTC_IRQHandler(void)
 {
-	uint32_t time;
-	if (rtc_flag_get(RTC_FLAG_SECOND) != RESET){
-		/* clear the RTC second interrupt flag*/
-		rtc_flag_clear(RTC_FLAG_SECOND);
-		/* wait until last write operation on RTC registers has finished */
-		//rtc_lwoff_wait();
-		RTC_Callback(0);
-	}
-	else if (rtc_flag_get(RTC_FLAG_ALARM) != RESET){
-		/* clear the RTC second interrupt flag*/
-		rtc_flag_clear(RTC_FLAG_ALARM);
-		/* wait until last write operation on RTC registers has finished */
-		rtc_lwoff_wait();
-		time = rtc_get_time();
-		rtc_set_alarm(time+170*60);
-		RTC_Callback(1);
-	}
 }
 
 /*!

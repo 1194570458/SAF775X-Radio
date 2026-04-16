@@ -20,6 +20,7 @@ void SYS_Init(void)
 	//rcu_periph_clock_enable(RCU_I2C0);
 	//rcu_periph_clock_enable(RCU_I2C1);
 	
+  rcu_periph_clock_enable(RCU_CRC);
 	rcu_periph_clock_enable(RCU_USART0);
 	
 	delay_ms(5);

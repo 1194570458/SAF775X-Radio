@@ -11,11 +11,11 @@
 #include "lcd.h"
 #include "ui.h"
 #include "func.h"
-#include "rtc.h"
 
 #include "Dirana3BasicDSP.h"
 
-#include "flashdb.h"
+#include "lfs.h"
+#include "lfs_port.h"
 #include "sfud.h"
 
 #define KEY_MENU    0
@@ -59,30 +59,24 @@ struct graphicEQ sAudioEQ;
 struct filterSystem sAudioFilter;
 struct keyFunc sAudioKeyFunc;
 
+struct lfsAudioCfg {
+  struct basicControl basic;
+  struct toneControl tone;
+  struct graphicEQ geq;
+  struct filterSystem filter;
+  struct keyFunc keyf;
+};
+
 struct device sDevice = {
   .bAutoMono=true,
   .bSoftReboot=true,
-  .sInfo.pid[0]=11,  // flash arrange
+  .sInfo.pid[0]=13,  // flash arrange
   .sInfo.pid[1]=2,  // version
-  .sInfo.pid[2]=3,  // subversion
-  .sInfo.pid[3]=20250408
+  .sInfo.pid[2]=5,  // subversion
+  .sInfo.pid[3]=20260101
 };
 
-uint32_t nConfigVer = 0;
-
-#define FDB_LOG_TAG "[kvdb]"
-
-/* default KV nodes */
-static struct fdb_default_kv_node default_kv_table[] = {
-  {"codeName", "NYK7751", 0}, /* string KV */
-  {"Author", "NyaKoishi", 0}, /* string KV */
-  {"bootCount", &bootCount, sizeof(bootCount)}, // Int Type
-  {"bootTime", &accBootTime, sizeof(accBootTime)},
-  {"cfgVer", &nConfigVer, sizeof(nConfigVer)}
-};
-
-/* KVDB object */
-static struct fdb_kvdb kvdb = { 0 };
+lfs_t lfs;
 
 /************************************Var***************************************/
 
@@ -94,6 +88,8 @@ struct RDSBuffer sRDSBuffer;
 struct RDSData sRDSData;
 
 volatile bool tmpMono;
+
+uint32_t cfg_crc = 0;
 
 /************************************Indicator*********************************/
 
@@ -113,13 +109,16 @@ volatile bool bFilterSel = false;  //是否设置带宽
 volatile int nSyncTimer = 600;
 volatile bool bFlagSync = false;
 
+volatile int nRebootTimer = 10500;
+
 /************************************Channel***********************************/
 
 CHANNEL nChannel[NUM_BANDS] = {
-  { CHS_FM, 0, 0, {0} },
-  { CHS_LW, 0, 0, {0} },
-  { CHS_MW, 0, 0, {0} },
-  { CHS_SW, 0, 0, {0} },
+//  MaxNum,  Num, Index, Freq
+  { CHS_FM,  0,   0,     {0} },
+  { CHS_LW,  0,   0,     {0} },
+  { CHS_MW,  0,   0,     {0} },
+  { CHS_SW,  0,   0,     {0} },
 };
 
 /************************************ Flash **********************************/
@@ -128,98 +127,133 @@ char bandDbName[NUM_BANDS][7] = {"bandFm", "bandLw", "bandMw", "bandSw"};
 
 void saveSettings(uint8_t cfgID)
 {
-  struct fdb_blob blob;
-  fdb_err_t err;
+  lfs_file_t file;
+  uint32_t buffer_u32[8];
+  
   if(cfgID == CFG_DEVICE || cfgID == CFG_ALL) {
-    err = fdb_kv_set_blob(&kvdb, "cfgVer", fdb_blob_make(&blob, &sDevice.sInfo.pid[0], sizeof(sDevice.sInfo.pid[0])));
-    fdb_kv_set_blob(&kvdb, "cfgAutomono", fdb_blob_make(&blob, &sDevice.bAutoMono, sizeof(sDevice.bAutoMono)));
-    fdb_kv_set_blob(&kvdb, "cfgSoftboot", fdb_blob_make(&blob, &sDevice.bSoftReboot, sizeof(sDevice.bSoftReboot)));
+    buffer_u32[0] = sDevice.sInfo.pid[0];
+    buffer_u32[1] = sDevice.bAutoMono;
+    buffer_u32[2] = sDevice.bSoftReboot;
+    
+    lfs_file_open(&lfs, &file, "cfgDevice", LFS_O_WRONLY | LFS_O_CREAT);
+    lfs_file_write(&lfs, &file, buffer_u32, 12);
+    lfs_file_close(&lfs, &file);
   }
   
   if(cfgID == CFG_RADIO || cfgID == CFG_ALL) {
-    err = fdb_kv_set_blob(&kvdb, "cfgTuner", fdb_blob_make(&blob, &sTuner, sizeof(sTuner)));
+    lfs_file_open(&lfs, &file, "cfgTuner", LFS_O_WRONLY | LFS_O_CREAT);
+    lfs_file_write(&lfs, &file, &sTuner, sizeof(sTuner));
+    lfs_file_close(&lfs, &file);
   }
   
   if(cfgID == CFG_DISP || cfgID == CFG_ALL) {
-    err = fdb_kv_set_blob(&kvdb, "cfgDisplay", fdb_blob_make(&blob, &sDisplay, sizeof(sDisplay)));
+    lfs_file_open(&lfs, &file, "cfgDisplay", LFS_O_WRONLY | LFS_O_CREAT);
+    lfs_file_write(&lfs, &file, &sDisplay, sizeof(sDisplay));
+    lfs_file_close(&lfs, &file);
   }
   
   if(cfgID == CFG_AUDIO || cfgID == CFG_ALL) {
-    err = fdb_kv_set_blob(&kvdb, "cfgAudio", fdb_blob_make(&blob, &sAudioBasic, sizeof(sAudioBasic)));
-    err = fdb_kv_set_blob(&kvdb, "cfgTone", fdb_blob_make(&blob, &sAudioTone, sizeof(sAudioTone)));
-    err = fdb_kv_set_blob(&kvdb, "cfgEq", fdb_blob_make(&blob, &sAudioEQ, sizeof(sAudioEQ)));
-    err = fdb_kv_set_blob(&kvdb, "cfgFilter", fdb_blob_make(&blob, &sAudioFilter, sizeof(sAudioFilter)));
-    err = fdb_kv_set_blob(&kvdb, "cfgAuKey", fdb_blob_make(&blob, &sAudioKeyFunc, sizeof(sAudioKeyFunc)));
+    struct lfsAudioCfg t = {
+      .basic = sAudioBasic,
+      .filter = sAudioFilter,
+      .geq = sAudioEQ,
+      .tone = sAudioTone,
+      .keyf = sAudioKeyFunc
+    };
+    lfs_file_open(&lfs, &file, "cfgAudio", LFS_O_WRONLY | LFS_O_CREAT);
+    lfs_file_write(&lfs, &file, &t, sizeof(t));
+    lfs_file_close(&lfs, &file);
   }
   
 }
 
 void readSettings(uint8_t cfgID)
 {
-  struct fdb_blob blob;
+  lfs_file_t file;
+  uint32_t buffer_u32[8];
   int needUpdate = 0;
   
   if(cfgID == CFG_DEVICE || cfgID == CFG_ALL) {
-    fdb_kv_get_blob(&kvdb, "cfgAutomono", fdb_blob_make(&blob, &sDevice.bAutoMono, sizeof(sDevice.bAutoMono)));
-    fdb_kv_get_blob(&kvdb, "cfgSoftboot", fdb_blob_make(&blob, &sDevice.bSoftReboot, sizeof(sDevice.bSoftReboot)));
-    needUpdate += blob.saved.len;
+    if(lfs_file_open(&lfs, &file, "cfgDevice", LFS_O_RDONLY) != 0) {
+      printf("[NVM/ERR] Failed to open \"cfgDevice\" file.\n");
+    } else {
+      lfs_file_read(&lfs, &file, buffer_u32, 12);
+      sDevice.bAutoMono = buffer_u32[1];
+      sDevice.bSoftReboot = buffer_u32[2];
+      lfs_file_close(&lfs, &file);
+    }
   }
   
   if(cfgID == CFG_RADIO || cfgID == CFG_ALL) {
-    fdb_kv_get_blob(&kvdb, "cfgTuner", fdb_blob_make(&blob, &sTuner, sizeof(sTuner)));
-    needUpdate += blob.saved.len;
+    if(lfs_file_open(&lfs, &file, "cfgTuner", LFS_O_RDONLY) != 0) {
+      printf("[NVM/ERR] Failed to open \"cfgTuner\" file.\n");
+    } else {
+      lfs_file_read(&lfs, &file, &sTuner, sizeof(sTuner));
+      lfs_file_close(&lfs, &file);
+    }
   }
   
   if(cfgID == CFG_DISP || cfgID == CFG_ALL) {
-    fdb_kv_get_blob(&kvdb, "cfgDisplay", fdb_blob_make(&blob, &sDisplay, sizeof(sDisplay)));
-    needUpdate += blob.saved.len;
+    if(lfs_file_open(&lfs, &file, "cfgDisplay", LFS_O_RDONLY) != 0) {
+      printf("[NVM/ERR] Failed to open \"cfgDisplay\" file.\n");
+    } else {
+      lfs_file_read(&lfs, &file, &sDisplay, sizeof(sDisplay));
+      lfs_file_close(&lfs, &file);
+    }
   }
   
   if(cfgID == CFG_AUDIO || cfgID == CFG_ALL) {
-    fdb_kv_get_blob(&kvdb, "cfgAudio", fdb_blob_make(&blob, &sAudioBasic, sizeof(sAudioBasic)));
-    needUpdate += blob.saved.len;
-    fdb_kv_get_blob(&kvdb, "cfgTone", fdb_blob_make(&blob, &sAudioTone, sizeof(sAudioTone)));
-    needUpdate += blob.saved.len;
-    fdb_kv_get_blob(&kvdb, "cfgEq", fdb_blob_make(&blob, &sAudioEQ, sizeof(sAudioEQ)));
-    needUpdate += blob.saved.len;
-    fdb_kv_get_blob(&kvdb, "cfgFilter", fdb_blob_make(&blob, &sAudioFilter, sizeof(sAudioFilter)));
-    needUpdate += blob.saved.len;
-    fdb_kv_get_blob(&kvdb, "cfgAuKey", fdb_blob_make(&blob, &sAudioKeyFunc, sizeof(sAudioKeyFunc)));
-    needUpdate += blob.saved.len;
+    struct lfsAudioCfg t;
+    if(lfs_file_open(&lfs, &file, "cfgAudio", LFS_O_RDONLY) != 0) {
+      printf("[NVM/ERR] Failed to open \"cfgAudio\" file.\n");
+    } else {
+      lfs_file_read(&lfs, &file, &t, sizeof(t));
+      lfs_file_close(&lfs, &file);
+      
+      sAudioBasic = t.basic;
+      sAudioTone = t.tone;
+      sAudioEQ = t.geq;
+      sAudioFilter = t.filter;
+      sAudioKeyFunc = t.keyf;
+    }
   }
-  
-  
 }
 
 void saveChannels(uint8_t band)
 {
   if(band >= NUM_BANDS)
     return;
-  struct fdb_blob blob;
+  lfs_file_t file;
   
-  fdb_kv_set_blob(&kvdb, bandDbName[band], fdb_blob_make(&blob, &nChannel[band], sizeof(CHANNEL)));
+  lfs_file_open(&lfs, &file, bandDbName[band], LFS_O_WRONLY | LFS_O_CREAT);
+  lfs_file_write(&lfs, &file, &nChannel[band], sizeof(CHANNEL));
+  lfs_file_close(&lfs, &file);
 }
 
 void readChannels(uint8_t band)
 {
   if(band >= NUM_BANDS)
     return;
-  struct fdb_blob blob;
+  lfs_file_t file;
   CHANNEL tmp = {0};
   
-  fdb_kv_get_blob(&kvdb, bandDbName[band], fdb_blob_make(&blob, &tmp, sizeof(CHANNEL)));
-  if(blob.saved.len > 0) {
+  if(lfs_file_open(&lfs, &file, bandDbName[band], LFS_O_RDONLY) != 0) {
+    printf("[NVM/ERR] Failed to open \"%s\" file.\n", bandDbName[band]);
+  } else {
+    lfs_file_read(&lfs, &file, &tmp, sizeof(CHANNEL));
+    lfs_file_close(&lfs, &file);
     if(tmp.chanNum > 0 && tmp.chanNum <= nChannel[band].chanMax) {
       memcpy(&nChannel[band], &tmp, sizeof(CHANNEL));
     }
   }
-  
 }
 
 // curFreq*4, curBand, curFilter*2, curVolumn*2, curMute
 void saveBasicPara(void) {
-  struct fdb_blob blob;
+  lfs_file_t file;
   uint16_t bSet[10] = {0};
+  
+  uint32_t tmp = 0;
   
   bSet[0] = sTuner.Radio.nBandMode;
   bSet[1] = sTuner.Radio.nBandFreq[0];
@@ -232,15 +266,32 @@ void saveBasicPara(void) {
   bSet[8] = sTuner.Audio.nVolume[1];
   bSet[9] = sTuner.Audio.bMuted;
   
-  fdb_kv_set_blob(&kvdb, "basicPara", fdb_blob_make(&blob, &bSet, sizeof(bSet)));
+  crc_data_register_reset();
+  tmp = crc_block_data_calculate((uint32_t*)bSet, sizeof(bSet)/4);
+  
+  if(tmp != cfg_crc) {
+    cfg_crc = tmp;
+    
+    lfs_file_open(&lfs, &file, "basicPara", LFS_O_WRONLY | LFS_O_CREAT);
+    lfs_file_write(&lfs, &file, &bSet, sizeof(bSet));
+    lfs_file_close(&lfs, &file);
+  }
+  
 }
 
 void readBasicPara(void) {
-  struct fdb_blob blob;
+  lfs_file_t file;
   uint16_t bSet[10] = {0};
   
-  fdb_kv_get_blob(&kvdb, "basicPara", fdb_blob_make(&blob, &bSet, sizeof(bSet)));
-  if(blob.saved.len > 0) {
+  if(lfs_file_open(&lfs, &file, "basicPara", LFS_O_RDONLY) != 0) {
+    printf("[NVM/ERR] Failed to open \"basicPara\" file.\n");
+  } else {
+    lfs_file_read(&lfs, &file, &bSet, sizeof(bSet));
+    lfs_file_close(&lfs, &file);
+    
+    crc_data_register_reset();
+    cfg_crc = crc_block_data_calculate((uint32_t*)bSet, sizeof(bSet)/4);
+    
     sTuner.Radio.nBandMode       = bSet[0];
     sTuner.Radio.nBandFreq[0]    = bSet[1];
     sTuner.Radio.nBandFreq[1]    = bSet[2];
@@ -251,6 +302,7 @@ void readBasicPara(void) {
     sTuner.Audio.nVolume[0]      = bSet[7];
     sTuner.Audio.nVolume[1]      = bSet[8];
     sTuner.Audio.bMuted          = bSet[9];
+    sTuner.Radio.nRFMode = nBandRFMode[sTuner.Radio.nBandMode];
   }
 }
 
@@ -724,7 +776,7 @@ void MenuDisplay(void)
           sDisplay.backTimeCounter = sDisplay.backTime*10;
         };break;
         case 2:{
-          sDisplay.contrast = inRangeInt(85,360,sDisplay.contrast+lcode);
+          sDisplay.contrast = inRangeInt(210,290,sDisplay.contrast+lcode); // max:85~360 usable:210~290
           DispContrast(sDisplay.contrast);
         };break;
         case 3:{
@@ -1149,15 +1201,11 @@ void MenuDevice(void)
   int8_t index = 0;
   uint16_t mcuInfo[2];
   uint8_t ver[19];
-  //int strLen = 0;
-  //char str[128];
   
   GetMCUInfo(sDevice.sInfo.uid,mcuInfo,mcuInfo+1);
   Get_REG(0xE2,ver,19);
   sDevice.sInfo.tid = ((uint32_t)ver[0]<<24) | ((uint32_t)ver[1]<<16) | ((uint32_t)ver[2]<<8) | ((uint32_t)ver[3]);
   
-  
-  //strLen = npf_snprintf(str, 128, "/**************************************************************/\n\n");
   
   printf("/**************************************************************/\n\n");
   
@@ -1355,7 +1403,7 @@ void MenuMain(void)
 int main(void)
 {
   int16_t tmpArr[4] = {0};
-  
+  uint32_t buffer_u32[4] = {0};
   
   SYS_Init();
   GPIO_Init();
@@ -1365,20 +1413,6 @@ int main(void)
   delay_ms(200);
   
   Timer_Init();
-  if(bkp_read_data(BKP_DATA_0) != 0xA5A5) {
-    /* backup data register value is not correct or not yet programmed
-    (when the first time the program is executed) */
-    RTC_Init();
-    bkp_write_data(BKP_DATA_0, 0xA5A5);
-  } else {
-    /* allow access to BKP domain */
-    rcu_periph_clock_enable(RCU_PMU);
-    pmu_backup_write_enable();
-    
-    rtc_register_sync_wait();
-    rtc_interrupt_enable(RTC_INT_SECOND);
-    rtc_set_alarm(170*60);
-  }
   
   ADC_Init();
   DAC_Init();
@@ -1386,47 +1420,60 @@ int main(void)
   sfud_init();
   delay_ms(10);
   
-  fdb_err_t result;
-  int discardDB = 0;
-  struct fdb_default_kv default_kv;
+  lfs_file_t file;
+  int fs_err = 0;
+  int discardNVM = 0;
   
-  default_kv.kvs = default_kv_table;
-  default_kv.num = sizeof(default_kv_table) / sizeof(default_kv_table[0]);
-  result = fdb_kvdb_init(&kvdb, "koishi", "RadioSet", &default_kv, NULL);
-  
-  if (result != FDB_NO_ERR) {
-    // Database init fail !!! Discard Database, Use default settings
-    discardDB = 1;
-    FDB_INFO("Flash DataBase Init Fail!\n");
+  if(sfud_lfs_init() != 0) {
+    printf("[SFUD/ERR] Unable to get sfud device(Get NULL)!\n");
   }
   
+  fs_err =  lfs_mount(&lfs, &lfs_cfg);
+  if(fs_err) {
+    lfs_format(&lfs, &lfs_cfg);
+    fs_err = lfs_mount(&lfs, &lfs_cfg);
+  }
   
+  if (fs_err != 0) {
+    // Database init fail !!! Discard Database, Use default settings
+    discardNVM = 1;
+    printf("[NVM/ERR] Flash DataBase Init Fail!\n");
+  }
   
   // Read Configs from database
-  struct fdb_blob blob;
-  if(!discardDB) {
-    /* get the "boot_count" KV value */
-    fdb_kv_get_blob(&kvdb, "bootCount", fdb_blob_make(&blob, &bootCount, sizeof(bootCount)));
-    bootCount++;
-    fdb_kv_set_blob(&kvdb, "bootCount", fdb_blob_make(&blob, &bootCount, sizeof(bootCount)));
-    FDB_INFO("BootCount: %d -> %d\n", bootCount-1, bootCount);
+  if(!discardNVM) {
+    if(lfs_file_open(&lfs, &file, "bootCount", LFS_O_RDWR | LFS_O_CREAT) == 0) {
+      lfs_file_read(&lfs, &file, &bootCount, sizeof(bootCount));
+      printf("[NVM/INFO] BootCount %d -> %d\n", bootCount, bootCount+1);
+      bootCount += 1;
+      lfs_file_rewind(&lfs, &file);
+      lfs_file_write(&lfs, &file, &bootCount, sizeof(bootCount));
+      lfs_file_close(&lfs, &file);
+    }
     
     int needUpdate = 0;
     
-    fdb_kv_get_blob(&kvdb, "cfgVer", fdb_blob_make(&blob, &nConfigVer, sizeof(nConfigVer)));
-    if(blob.saved.len > 0) {
-      FDB_INFO("Config version: %d vs %d\n", nConfigVer, sDevice.sInfo.pid[0]);
-      if(sDevice.sInfo.pid[0] != nConfigVer) {
-        FDB_INFO("Config version not match! Using default configs\n");
+    if(lfs_file_open(&lfs, &file, "cfgDevice", LFS_O_RDWR) != 0) {
+      printf("[NVM/ERR] Failed to open \"cfgDevice\" file.\n");
+      printf("[NVM/WARN] Config version not match! Using default configs\n");
+      needUpdate = 1;
+    } else {
+      lfs_file_read(&lfs, &file, buffer_u32, 12);
+      lfs_file_close(&lfs, &file);
+      printf("[NVM/INFO] Config version: %d vs %d\n", buffer_u32[0], sDevice.sInfo.pid[0]);
+      if(sDevice.sInfo.pid[0] != buffer_u32[0]) {
+        printf("[NVM/WARN] Config version not match! Using default configs\n");
         needUpdate = 1;
       }
-    } else {
-      FDB_INFO("Fail to read config version\n");
+    }
+    
+    // Press LENC @Startup to force init FDB
+    if(gpio_input_bit_get(GPIOA, GPIO_PIN_0) == 0) {
+      printf("[NVM/WARN] User force to use default configs!\n");
       needUpdate = 1;
     }
     
     if(needUpdate) { // Write Configs
-      fdb_kv_set_default(&kvdb);
       
       LCD_StructInit(true);
       TunerStructInit(&sTuner, true);
@@ -1442,6 +1489,7 @@ int main(void)
       sDevice.sTime.second = 0;
       sDevice.sTime.timestamp = 0;
       saveSettings(CFG_ALL);
+      bFlagSync = true;
     } else { // Read Configs
       readSettings(CFG_ALL);
       readChannels(BAND_FM);
@@ -1542,7 +1590,7 @@ int main(void)
   SetFMStereoImprovement(sTuner.Config.bFMSI);
   tmpMono = sTuner.Config.bForceMono;
   
-  setMute(ADSP_MUTE_MAIN, 0);
+  SetMute(sTuner.Audio.bMuted);
   
   UI_Main(true);
   
@@ -1742,6 +1790,8 @@ int main(void)
       
       RDS_Init(&sRDSData);
       
+      nRebootTimer = 10500;
+      
     }
     
     UI_Main(false);
@@ -1760,13 +1810,13 @@ int main(void)
 
 void TIM_Callback(uint8_t tim)
 {
-  static uint16_t timer_RDS = TIM_INT_RDS;
-  static uint16_t timer_KEY = TIM_INT_KEY;
-  static uint16_t timer_LCD = TIM_INT_LCD;
-  static uint16_t timer_GSA = TIM_INT_GSA-10;
-  static uint16_t timer_RFS = TIM_INT_RFS;
-  static uint16_t timer_ONE = TIM_INT_ONE;
-  static uint16_t timer_BAT = TIM_INT_BAT;
+  static int16_t timer_RDS = TIM_INT_RDS;
+  static int16_t timer_KEY = TIM_INT_KEY;
+  static int16_t timer_LCD = TIM_INT_LCD;
+  static int16_t timer_GSA = TIM_INT_GSA-10;
+  static int16_t timer_RFS = TIM_INT_RFS;
+  static int16_t timer_ONE = TIM_INT_ONE;
+  static int16_t timer_BAT = TIM_INT_BAT;
   
   if(tim == 5)  // 1khz
   {
@@ -1801,7 +1851,7 @@ void TIM_Callback(uint8_t tim)
     /*********************SW TIM*******************/
     
     timer_KEY--;
-    if(timer_KEY == 0)
+    if(timer_KEY <= 0)
     {
       timer_KEY = TIM_INT_KEY;
       adc_software_trigger_enable(ADC0, ADC_REGULAR_CHANNEL);
@@ -1834,7 +1884,7 @@ void TIM_Callback(uint8_t tim)
     {
       bFlagGSA = 1;
     }
-    if(timer_LCD == 0)
+    if(timer_LCD <= 0)
     {
       timer_LCD = TIM_INT_LCD;
       if(bMenuLCD == false)
@@ -1843,18 +1893,11 @@ void TIM_Callback(uint8_t tim)
     
     if(sTuner.Status.nRSSI > 20 && sTuner.Radio.nBandMode == BAND_FM)
       timer_RDS--;
-    if(timer_RDS == 0)
+    if(timer_RDS <= 0)
     {
       timer_RDS = TIM_INT_RDS;
       bFlagRDS = 1;
     }
-    
-//    timer_GSA--;
-//    if(timer_GSA == 0)
-//    {
-//      timer_GSA = TIM_INT_GSA;
-//      bFlagGSA = 1;
-//    }
     
     timer_interrupt_flag_clear(TIMER5, TIMER_INT_FLAG_UP);
   }
@@ -1870,19 +1913,47 @@ void TIM_Callback(uint8_t tim)
     }
     
     timer_RFS--;
-    if(timer_RFS == 0) {
+    if(timer_RFS <= 0) {
       timer_RFS = TIM_INT_RFS;
       bFlagRFS = 1;
     }
     
     timer_ONE--;
-    if(timer_ONE == 0) {
+    if(timer_ONE <= 0) {
       timer_ONE = TIM_INT_ONE;
+      
+      // Sys Clock
+      sDevice.sTime.second++;
+      if(sDevice.sTime.second == 60)
+      {
+        sDevice.sTime.second = 0;
+        sDevice.sTime.minute++;
+      }
+      if(sDevice.sTime.minute == 60)
+      {
+        sDevice.sTime.minute = 0;
+        sDevice.sTime.hour++;
+      }
+      if(sDevice.sTime.hour == 24)
+      {
+        sDevice.sTime.hour = 0;
+        sDevice.sTime.day++;
+      }
+      
+      // Sys Reboot
+      if(nRebootTimer > 0) {
+        nRebootTimer--;
+        if(nRebootTimer <= 0) {
+          nRebootTimer = 0;
+          if(sTuner.Config.bDemoMode == true)
+            bFlagReBoot = true;
+        }
+      }
       
     }
     
     timer_BAT--;
-    if(timer_BAT == 0) {
+    if(timer_BAT <= 0) {
       if(gpio_input_bit_get(GPIOC, GPIO_PIN_3) == RESET) {
         timer_BAT = 2;
         gpio_bit_set(GPIOC, GPIO_PIN_3);
@@ -2007,34 +2078,6 @@ void ADC_Callback(uint8_t adc, char group)
       sDevice.nIntTemp = myround( (1.45-(float)valInsert*3.3/4096.0)/(0.0041) + 25 );
       adc_interrupt_flag_clear(ADC0,ADC_INT_FLAG_EOIC);
     }
-  }
-}
-
-void RTC_Callback(uint8_t line)
-{
-  if(line == 0)  // second
-  {
-    sDevice.sTime.second++;
-    if(sDevice.sTime.second == 60)
-    {
-      sDevice.sTime.second = 0;
-      sDevice.sTime.minute++;
-    }
-    if(sDevice.sTime.minute == 60)
-    {
-      sDevice.sTime.minute = 0;
-      sDevice.sTime.hour++;
-    }
-    if(sDevice.sTime.hour == 24)
-    {
-      sDevice.sTime.hour = 0;
-      sDevice.sTime.day++;
-    }
-  }
-  if(line == 1)  // alarm
-  {
-    if(sTuner.Config.bDemoMode == true)
-      bFlagReBoot = true;
   }
 }
 

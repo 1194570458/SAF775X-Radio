@@ -22,7 +22,7 @@ uint8_t flash_readWriteByte(uint8_t TxData)
  */
 uint8_t flash_readStatueReg(void)
 {
-	uint8_t byte=0;   
+	uint8_t byte=0;
 	FLASH_CS(0);
 	flash_readWriteByte(FLASH_ReadStatusReg);
 	byte=flash_readWriteByte(0Xff);
@@ -147,14 +147,14 @@ void flash_program(uint32_t addr, uint8_t* data, uint32_t numTx)
 	
 }
 
-#define BULK_SIZE    4096
+#define BLOCK_SIZE    4096
 
-int flash_erase_bulk(uint32_t addr, uint32_t size)
+int flash_erase_block(uint32_t addr, uint32_t size)
 {
   uint32_t i = 0;
   uint32_t sAddr = addr;
-  int erase_pages = size / BULK_SIZE;
-  if( size % BULK_SIZE != 0) {
+  int erase_pages = size / BLOCK_SIZE;
+  if( size % BLOCK_SIZE != 0) {
     erase_pages++;
   }
   
@@ -165,9 +165,9 @@ int flash_erase_bulk(uint32_t addr, uint32_t size)
     
     flash_readWriteByte(ERASE_SECTOR);
     
-    flash_readWriteByte((uint8_t)( (sAddr+BULK_SIZE*i) >> 16));
-    flash_readWriteByte((uint8_t)( (sAddr+BULK_SIZE*i) >> 8));
-    flash_readWriteByte((uint8_t)( (sAddr+BULK_SIZE*i) ));
+    flash_readWriteByte((uint8_t)( (sAddr+BLOCK_SIZE*i) >> 16));
+    flash_readWriteByte((uint8_t)( (sAddr+BLOCK_SIZE*i) >> 8));
+    flash_readWriteByte((uint8_t)( (sAddr+BLOCK_SIZE*i) ));
     
     FLASH_CS(1);
     flash_waitBusy(15);
