@@ -102,6 +102,6 @@ void GUI_Rectangle(uint16_t xs, uint8_t ys, uint16_t length, uint8_t height, uin
 
 
 
-int GUI_RDS(uint16_t xs, const char* text, uint8_t textSize, uint8_t showStart, uint8_t showSize);
+int GUI_RDS(uint16_t xs, const char* text, uint8_t textSize, int16_t showStart, uint8_t showSize);
 
 #endif

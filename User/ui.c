@@ -757,19 +757,20 @@ void UI_Main(bool init)
   }
   
   
-  static uint8_t vRTpos = 0;
+  static int16_t vRTpos = 0;
   
-  if( sRDSData.RT_Size[sRDSData.RT_Flag] > 0 && vRTUpd >= 2 )
+  if( sRDSData.RT_Size[sRDSData.RT_Type] > 0 && vRTUpd >= 2 )
   {
     vRTUpd = 0;
     
+    vRTpos = inRangeLoop(-10, sRDSData.RT_Size[sRDSData.RT_Type], vRTpos, 2);
+    
     if(sDisplay.emiFree == true) {
-      GUI_RDS(114, (char*)sRDSData.RT[sRDSData.RT_Flag], sRDSData.RT_Size[sRDSData.RT_Flag], vRTpos, 20);
+      GUI_RDS(114, (char*)sRDSData.RT[sRDSData.RT_Type], sRDSData.RT_Size[sRDSData.RT_Type], vRTpos, 20);
     } else {
-      GUI_RDS(163, (char*)sRDSData.RT[sRDSData.RT_Flag], sRDSData.RT_Size[sRDSData.RT_Flag], vRTpos, 13);
+      GUI_RDS(163, (char*)sRDSData.RT[sRDSData.RT_Type], sRDSData.RT_Size[sRDSData.RT_Type], vRTpos, 13);
     }
     
-    vRTpos = inRangeLoop(0, sRDSData.RT_Size[sRDSData.RT_Flag], vRTpos, 2);
   }
 }
 

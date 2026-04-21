@@ -80,6 +80,53 @@ int min(int a, int b) {
   return a<b? a:b;
 }
 
+
+/* 初始化滤波器状态 */
+void cfd_filter_init(ConfidenceFilter *f) {
+    f->head = 0;
+    f->len  = 0;
+}
+
+/* 核心函数：输入新数据，返回当前最佳置信度数据 */
+int cfd_filter_update(ConfidenceFilter *f, int threshold, int new_val, int* return_val) {
+    /* 1. 将新值写入滑动窗口 */
+    f->history[f->head] = new_val;
+    f->head = (f->head + 1) & (CONF_FILTER_WINDOW-1);
+    if (f->len < CONF_FILTER_WINDOW) {
+        f->len++;
+    }
+
+    /* 2. 统计窗口内各值的出现频率，寻找众数 */
+    int best_val = f->history[0];
+    int max_freq = 0;
+
+    for (int i = 0; i < f->len; i++) {
+        int cur_val = f->history[i];
+        int freq = 0;
+        
+        /* 简单遍历统计频率（窗口较小，O(N^2) 完全可接受） */
+        for (int j = 0; j < f->len; j++) {
+            if (f->history[j] == cur_val) {
+                freq++;
+            }
+        }
+
+        /* 严格大于才更新：频率相同时保留最先达到最高频的值，保证稳定性 */
+        if (freq > max_freq) {
+            max_freq = freq;
+            best_val = cur_val;
+        }
+    }
+
+    // 如果出现频率低于阈值，返回错误
+    if(max_freq < threshold) {
+        return 1;
+    }
+
+    *return_val = best_val;
+    return 0;
+}
+
 /**************************************************************************************/
 /*
 DAC CHANNEL 1 -> PA4 -> BackLight

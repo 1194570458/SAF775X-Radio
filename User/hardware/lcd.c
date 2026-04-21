@@ -470,16 +470,23 @@ void GUI_Text(uint16_t xs, uint8_t ys, int16_t xe, int16_t ye, const char* text,
 }
 
 // ret 1:read \r    2:out of border
-int GUI_RDS(uint16_t xs, const char* text, uint8_t textSize, uint8_t showStart, uint8_t showSize)
+int GUI_RDS(uint16_t xs, const char* text, uint8_t textSize, int16_t showStart, uint8_t showSize)
 {
   const char* p_text = text;
   uint16_t x = xs;
   uint8_t y = 50;
   uint16_t endx = LCD_DRV_MAX_X;
   uint16_t endy = LCD_DRV_MAX_Y;
+  uint16_t acts;
   
-  uint8_t textDisp = min(textSize-showStart, showSize);
-  p_text+=showStart;
+  if(showStart < 0) {
+    acts = 0;
+  } else {
+    acts = showStart;
+  }
+  
+  uint8_t textDisp = min(textSize-acts, showSize);
+  p_text+=acts;
   
   while(textDisp)
   {

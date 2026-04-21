@@ -41,7 +41,6 @@ struct RDSData
   unsigned char RT[2][65]; // Radio Text  [ 2A/B ]
   int8_t RT_Type;          // Radio Text Type A:64CH B:32CH
   int8_t RT_Size[2];       // Radio Text Size
-  uint8_t RT_Flag;         // 0->Text A, 1->Text B
   int8_t Hour;             // Clock-Time and Date  [ 4A ]
   int8_t Minute;           // -1: Not Availible
 };

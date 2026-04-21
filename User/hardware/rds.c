@@ -1,5 +1,7 @@
 #include "rds.h"
 #include "stdbool.h"
+#include "string.h"
+#include "ctype.h"
 
 #include "func.h"
 
@@ -47,9 +49,9 @@ const unsigned char PTY_Table[32][9] =
 
 
 struct RDSData* rds;
-uint8_t GroupType = 0;
 static uint16_t RTDataMask = 0;
-static uint16_t oldpi = 0;
+
+ConfidenceFilter PI_filter, RT_filter;
 
 static uint16_t FindMin(uint8_t *str, uint16_t lengh)
 {
@@ -63,24 +65,17 @@ static uint16_t FindMin(uint8_t *str, uint16_t lengh)
   return min;
 }
 
-static void CopyStr(unsigned char* des, const unsigned char* source)
+
+
+static void CopyStr(unsigned char* des, const unsigned char* source, int len)
 {
-  unsigned char* r = des;
-  while(*source != '\0')
-  {
-    *r++ = *source++;
-  }
-  *r = '\0';
+  memcpy(des, source, len);
 }
 
-static void FillStr(unsigned char* str, uint16_t length, unsigned char ch)
+static void FillStr(unsigned char* str, unsigned char ch, int len)
 {
-  uint16_t i = 0;
-  for(i=0;i<length-1;i++)
-  {
-    str[i] = ch;
-  }
-  str[i] = '\0';
+  memset(str, ch, len);
+  str[len-1] = '\0';
 }
 
 /*
@@ -89,17 +84,17 @@ static void FillStr(unsigned char* str, uint16_t length, unsigned char ch)
  * 2:large error
  * 3:uncorrectable error
  */
-static uint8_t CheckError(struct RDSBuffer *rawdata, uint8_t block)
+static inline uint8_t CheckError(struct RDSBuffer *rawdata, uint8_t block)
 {
   return ( (rawdata->error >> block) & 0x03 );
 }
 
-static uint8_t CheckVersionType(struct RDSBuffer *rawdata)
+static inline uint8_t CheckVersionType(struct RDSBuffer *rawdata)
 {
   return ( (rawdata->status >> 4) & 0x01 );
 }
 
-static uint8_t CheckGroupType(struct RDSBuffer *rawdata)
+static inline uint8_t CheckGroupType(struct RDSBuffer *rawdata)
 {
   return ( (rawdata->block_B >> 12) & 0x000F );
 }
@@ -109,83 +104,65 @@ void RDS_Init(struct RDSData* init)
   rds = init;
   
   rds->PI = 0;
-  oldpi = 0;
   rds->PI_Available = false;
-  FillStr(rds->PTY, 8, ' ');
-  rds->PTY[8] = 0;
-  FillStr(rds->PS, 8, ' ');
-  rds->PS[8] = 0;
+  FillStr(rds->PTY, ' ', 9);
+  FillStr(rds->PS, ' ', 9);
   rds->PS_Available = false;
-  FillStr(rds->RT[0], 64, ' ');
-  FillStr(rds->RT[1], 64, ' ');
-  rds->RT[0][64] = 0;
-  rds->RT[1][64] = 0;
-  rds->RT_Flag = 0;
-  rds->RT_Size[0] = -1;
-  rds->RT_Size[1] = -1;
+  FillStr(rds->RT[0], ' ', 65);
+  FillStr(rds->RT[1], ' ', 65);
+  rds->RT_Type = 0;
+  rds->RT_Size[0] = 0;
+  rds->RT_Size[1] = 0;
   rds->Hour = -1;
   rds->Minute = -1;
   rds->RDSFlag = 0;
+  
+  cfd_filter_init(&PI_filter);
+  cfd_filter_init(&RT_filter);
 }
 
 void RDS_Refresh(void)
 {
   rds->PI = 0;
-  oldpi = 0;
   rds->PI_Available = false;
-  FillStr(rds->PTY, 8, ' ');
-  rds->PTY[8] = 0;
-  FillStr(rds->PS, 8, ' ');
-  rds->PS[8] = 0;
+  FillStr(rds->PTY, ' ', 9);
+  FillStr(rds->PS, ' ', 9);
   rds->PS_Available = false;
-  rds->RT_Flag = 0;
+  rds->RT_Type = 0;
   if(rds->RT_Size[0] > 0 || rds->RT_Size[1] > 0) {
-    FillStr(rds->RT[0], 64, ' ');
-    FillStr(rds->RT[1], 64, ' ');
-    rds->RT_Size[0] = -1;
-    rds->RT_Size[1] = -1;
+    FillStr(rds->RT[0], ' ', 65);
+    FillStr(rds->RT[1], ' ', 65);
   }
   rds->Hour = -1;
   rds->Minute = -1;
   rds->RDSFlag = 0;
+
+  cfd_filter_init(&PI_filter);
+  cfd_filter_init(&RT_filter);
 }
 
-uint16_t ReadPI(struct RDSBuffer *rawdata)
+int ReadPI(struct RDSBuffer *rawdata)
 {
-  uint16_t newpi = 0;
-  uint8_t error[2];
-  uint8_t min;
-  if(CheckVersionType(rawdata) == VERSION_B)
-  {
-    error[0] = CheckError(rawdata, BLOCK_A);
-    error[1] = CheckError(rawdata, BLOCK_C);
-    min = FindMin(error, 2);
-    if( error[min] <= RDS_ERR_MODE )
-    {
-      if(min == 0)
-        newpi = rawdata->block_A;
-      else
-        newpi = rawdata->block_C;
-    }
-    else
-      return 0;
+  static int oldpi = 0;
+  int newpi = 0;
+  uint8_t error;
+  
+  if(CheckError(rawdata, BLOCK_A) > RDS_ERR_MODE) {
+    return 1;
   }
-  else
-  {
-    if(CheckError(rawdata, BLOCK_A) <= RDS_ERR_MODE)
-    {
-      newpi = rawdata->block_A;
-    }
-    else
-      return 0;
+  
+  error = cfd_filter_update(&PI_filter, 3, rawdata->block_A, &newpi);
+  if(error) {
+    return 1;
   }
-  if(newpi != oldpi)
-  {
+  
+  if(newpi != oldpi) {
     oldpi = newpi;
+    rds->PI = newpi;
     rds->RDSFlag |= ReadyBit_PI;
     rds->PI_Available = true;
   }
-  return newpi;
+  return 0;
 }
 
 uint8_t ReadPTY(struct RDSBuffer *rawdata)
@@ -225,37 +202,65 @@ void ReadPS(struct RDSBuffer *rawdata)
   }
 }
 
+#include <stdio.h>
 void ReadRT(struct RDSBuffer *rawdata)
 {
   uint8_t segment = 0;
+  int16_t tmp;
+  int indi = 0;
   static uint8_t old_ind = 0;
-  static uint8_t old_version = VERSION_A;
   // segment = [ 0:15 ]
   segment = (uint8_t)(rawdata->block_B & 0x000F);
-  rds->RT_Flag = (rawdata->block_B >> 4) & 0x0001; 
+  indi = (rawdata->block_B >> 4) & 0x0001;
   
+  if(cfd_filter_update(&RT_filter, 2, indi, &indi)) {
+    return;  // unstable
+  }
+  
+  if(indi != old_ind) {  // text a/b switched, clear saved msg
+    printf("text a/b\n");
+    old_ind = indi;
+    FillStr(rds->RT[0], ' ', 65);
+    FillStr(rds->RT[1], ' ', 65);
+  }
+  
+  tmp = 0;
   if(CheckVersionType(rawdata) == VERSION_A)
   {
+    rds->RT_Type = 0;
     if(CheckError(rawdata, BLOCK_C) <= RDS_ERR_MODE) {
-      rds->RT[rds->RT_Flag][segment*4]   = WORD_HIGH_BYTE(rawdata->block_C);
-      rds->RT[rds->RT_Flag][segment*4+1] = WORD_LOW_BYTE(rawdata->block_C);
-      rds->RT_Size[rds->RT_Flag] = max(segment*4+2, rds->RT_Size[rds->RT_Flag]);
+      rds->RT[rds->RT_Type][segment*4]   = WORD_HIGH_BYTE(rawdata->block_C);
+      rds->RT[rds->RT_Type][segment*4+1] = WORD_LOW_BYTE(rawdata->block_C);
+      
+      if(isgraph(rds->RT[rds->RT_Type][segment*4])) tmp = segment*4+1;
+      if(isgraph(rds->RT[rds->RT_Type][segment*4+1])) tmp = segment*4+2;
+      rds->RT_Size[rds->RT_Type] = max(tmp, rds->RT_Size[rds->RT_Type]);
+      
       rds->RDSFlag |= ReadyBit_RT;
     }
     if(CheckError(rawdata, BLOCK_D) <= RDS_ERR_MODE) {
-      rds->RT[rds->RT_Flag][segment*4+2] = WORD_HIGH_BYTE(rawdata->block_D);
-      rds->RT[rds->RT_Flag][segment*4+3] = WORD_LOW_BYTE(rawdata->block_D);
-      rds->RT_Size[rds->RT_Flag] = max(segment*4+4, rds->RT_Size[rds->RT_Flag]);
+      rds->RT[rds->RT_Type][segment*4+2] = WORD_HIGH_BYTE(rawdata->block_D);
+      rds->RT[rds->RT_Type][segment*4+3] = WORD_LOW_BYTE(rawdata->block_D);
+      
+      if(isgraph(rds->RT[rds->RT_Type][segment*4])) tmp = segment*4+3;
+      if(isgraph(rds->RT[rds->RT_Type][segment*4+1])) tmp = segment*4+4;
+      rds->RT_Size[rds->RT_Type] = max(tmp, rds->RT_Size[rds->RT_Type]);
+      
       rds->RDSFlag |= ReadyBit_RT;
     }
   }
   else
   {
+    rds->RT_Type = 1;
     if(CheckError(rawdata, BLOCK_D) <= RDS_ERR_MODE)
     {
-      rds->RT[rds->RT_Flag][segment*2] = WORD_HIGH_BYTE(rawdata->block_D);
-      rds->RT[rds->RT_Flag][segment*2+1] = WORD_LOW_BYTE(rawdata->block_D);
-      rds->RT_Size[rds->RT_Flag] = max(segment*2+2, rds->RT_Size[rds->RT_Flag]);
+      rds->RT[rds->RT_Type][segment*2] = WORD_HIGH_BYTE(rawdata->block_D);
+      rds->RT[rds->RT_Type][segment*2+1] = WORD_LOW_BYTE(rawdata->block_D);
+      
+      if(isgraph(rds->RT[rds->RT_Type][segment*4])) tmp = segment*2+1;
+      if(isgraph(rds->RT[rds->RT_Type][segment*4+1])) tmp = segment*2+2;
+      rds->RT_Size[rds->RT_Type] = max(tmp, rds->RT_Size[rds->RT_Type]);
+      
       rds->RDSFlag |= ReadyBit_RT;
     }
   }
@@ -291,15 +296,13 @@ void ReadCT(struct RDSBuffer *rawdata)
 
 void DecodeRDS(struct RDSBuffer *rawdata)
 {
-  rds->PI = ReadPI(rawdata);
+  ReadPI(rawdata);
   
   if(CheckError(rawdata, BLOCK_B) <= RDS_ERR_MODE)
   {
 //    CopyStr(rds->PTY, PTY_Table[ReadPTY(rawdata)]);
     
-    GroupType = CheckGroupType(rawdata);
-    
-    switch(GroupType)
+    switch(CheckGroupType(rawdata))
     {
       case 0:{  // Program Service name
         ReadPS(rawdata);

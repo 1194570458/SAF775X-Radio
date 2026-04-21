@@ -70,10 +70,10 @@ struct lfsAudioCfg {
 struct device sDevice = {
   .bAutoMono=true,
   .bSoftReboot=true,
-  .sInfo.pid[0]=14,  // flash arrange
+  .sInfo.pid[0]=15,  // flash arrange
   .sInfo.pid[1]=2,  // version
   .sInfo.pid[2]=6,  // subversion
-  .sInfo.pid[3]=20260417
+  .sInfo.pid[3]=20260420
 };
 
 lfs_t lfs;
