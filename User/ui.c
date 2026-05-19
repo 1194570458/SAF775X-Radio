@@ -6,6 +6,7 @@
 #include "Dirana3BasicDSP.h"
 #include "font.h"
 #include "func.h"
+#include <stdio.h>
 #include <math.h>
 
 /*************************************EXTERN***********************************/
@@ -171,8 +172,60 @@ void UI_DrawScrollBar(uint8_t totalNum, uint8_t nowPos)
     tmp = tmp + '1';
   else
     tmp = tmp - 9 + 'A';
+  if(tmp > 'Z')
+    tmp = '+';
+  
   GUI_Char(250,86,tmp,&Font8,COLOR_BLACK,COLOR_WHITE);
   lastPos = nowPos;
+}
+
+static void FormatChannelLabel(uint8_t band, uint8_t chIndex, char* text, uint8_t textSize)
+{
+  uint16_t freq = nChannel[band].chanFreq[chIndex];
+  if(band == BAND_FM)
+    snprintf(text, textSize, "%02u. %u.%02uMHz", chIndex+1, freq/100, freq%100);
+  else
+    snprintf(text, textSize, "%02u. %ukHz", chIndex+1, freq);
+}
+
+void UI_ChannelManager(uint8_t band, int8_t index)
+{
+  char line[24] = {0};
+  uint8_t total = nChannel[band].chanNum;
+  uint8_t start = 0;
+  uint8_t cursor = 0;
+  uint8_t drawIndex = 0;
+  uint8_t y = 0;
+
+  GUI_ClearBuff(COLOR_WHITE);
+  GUI_Text(62,0,-1,-1,"Manage Memory",&Font20,COLOR_BLACK,COLOR_WHITE);
+
+  if(total == 0)
+  {
+    GUI_Text(47,36,-1,-1,"No Saved Channel",&Font20,COLOR_BLACK,COLOR_WHITE);
+    GUI_Text(43,60,-1,-1,"-- Press MENU to Back --",&Font12,COLOR_DARK,COLOR_WHITE);
+    GUI_FillBuff(248,0,8,96,COLOR_WHITE);
+    return;
+  }
+
+  index = inRangeInt(0, total-1, index);
+
+  start = (index/4)*4;
+  for(cursor = 0; cursor < 4; cursor++)
+  {
+    y = 24 + cursor*18;
+    drawIndex = start + cursor;
+    GUI_FillBuff(0,y,248,16,drawIndex == index ? COLOR_LIGHT : COLOR_WHITE);
+    if(drawIndex >= total)
+      continue;
+
+    FormatChannelLabel(band, drawIndex, line, sizeof(line));
+    if(drawIndex == index)
+      GUI_FillBuff(0,y,4,16,COLOR_BLACK);
+    GUI_Text(8,y,240,y+16,line,&Font16,COLOR_BLACK,drawIndex == index ? COLOR_LIGHT : COLOR_WHITE);
+  }
+
+  UI_DrawScrollBar(total, index);
 }
 
 
@@ -1114,7 +1167,7 @@ void UI_Search(int8_t index, bool init)
     case 1 :UI_DrawTextBox(1,img_commonSet20x,"ATS Mode",true,atsTitle[sTuner.ATS.nATSMode]);break;
     case 2 :UI_DrawValueBox(2,img_commonSet20x,"Threshold",true,sTuner.ATS.nSigThreshold,"dBuV");break;
     case 3 :UI_DrawValueBox(3,img_commonSet20x,"MW Step",true,sTuner.ATS.nMWStep,"K");break;
-    case 4 :UI_DrawCheckBox(0,img_commonSet20x,"Manage Memory",false,false);break;
+    case 4 :UI_DrawCheckBox(0,img_commonSet20x,"Manage Memory",true,false);break;
     case 5 :UI_DrawCheckBox(1,img_commonSet20x,"Start Search CH",true,false);break;
     default : break;
   }
