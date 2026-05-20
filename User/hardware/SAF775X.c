@@ -892,3 +892,44 @@ void TunerInit(void)
 	TuneFreq(sys->Radio.nBandFreq[sys->Radio.nBandMode], Preset);
 }
 
+void SetCoaxOutput(bool on)
+{
+	if(on)
+	{
+		// Route local processed audio to SPDIF output.
+		// SPDIFxOutpntr is a stereo pointer, so FrontOutL routes FrontOutL/FrontOutR.
+		// UM SAF775x 2.3.3, Table 28:
+		// SPDIF output mode 0 -> Transmit enable, Bypass off.
+		Set_ADSP(ADSP_X_SPDIF0Outpntr, ADSP_X_FrontOutL_REL);
+		Set_ADSP(ADSP_X_SPDIF1Outpntr, ADSP_X_FrontOutL_REL);
+		Set_REGFree(3, 0xA9, 0x22, 0x00);
+		Set_REGFree(3, 0xA9, 0x23, 0x00);
+	}
+	else
+	{
+		Set_REGFree(3, 0xA9, 0x22, 0x02);
+		Set_REGFree(3, 0xA9, 0x23, 0x02);
+	}
+}
+
+void SetHostI2S0Output(bool on)
+{
+	if(on)
+	{
+		// Route local processed audio to Host I2S output 0.
+		// HIIS0Outpntr is a stereo pointer, so FrontOutL routes FrontOutL/FrontOutR.
+		// UM SAF775x 2.3.2:
+		//   0x1A = 0 -> Philips format for Host I2S outputs
+		//   0x16 = 0 -> Host I2S output 0 enabled
+		Set_REGFree(3, 0xA9, 0x1A, 0x00);
+		Set_REGFree(3, 0xA9, 0x60, 0x00);
+		Set_REGFree(3, 0xA9, 0x65, 0x00);
+		Set_REGFree(3, 0xA9, 0x16, 0x00);
+		Set_ADSP(ADSP_X_HIIS0Outpntr, ADSP_X_FrontOutL_REL);
+	}
+	else
+	{
+		Set_REGFree(3, 0xA9, 0x16, 0x01);
+	}
+}
+

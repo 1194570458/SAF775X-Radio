@@ -69,6 +69,8 @@ struct lfsAudioCfg {
 
 struct device sDevice = {
   .bAutoMono=true,
+  .bCoaxEnable=false,
+  .bI2SOutEnable=false,
   .bSoftReboot=true,
   .sInfo.pid[0]=15,  // flash arrange
   .sInfo.pid[1]=2,  // version
@@ -128,15 +130,17 @@ char bandDbName[NUM_BANDS][7] = {"bandFm", "bandLw", "bandMw", "bandSw"};
 void saveSettings(uint8_t cfgID)
 {
   lfs_file_t file;
-  uint32_t buffer_u32[8];
+  uint32_t buffer_u32[8] = {0};
   
   if(cfgID == CFG_DEVICE || cfgID == CFG_ALL) {
     buffer_u32[0] = sDevice.sInfo.pid[0];
     buffer_u32[1] = sDevice.bAutoMono;
     buffer_u32[2] = sDevice.bSoftReboot;
+    buffer_u32[3] = sDevice.bCoaxEnable;
+    buffer_u32[4] = sDevice.bI2SOutEnable;
     
     lfs_file_open(&lfs, &file, "cfgDevice", LFS_O_WRONLY | LFS_O_CREAT);
-    lfs_file_write(&lfs, &file, buffer_u32, 12);
+    lfs_file_write(&lfs, &file, buffer_u32, 20);
     lfs_file_close(&lfs, &file);
   }
   
@@ -170,16 +174,23 @@ void saveSettings(uint8_t cfgID)
 void readSettings(uint8_t cfgID)
 {
   lfs_file_t file;
-  uint32_t buffer_u32[8];
+  uint32_t buffer_u32[8] = {0};
   int needUpdate = 0;
   
   if(cfgID == CFG_DEVICE || cfgID == CFG_ALL) {
+    buffer_u32[0] = sDevice.sInfo.pid[0];
+    buffer_u32[1] = sDevice.bAutoMono;
+    buffer_u32[2] = sDevice.bSoftReboot;
+    buffer_u32[3] = sDevice.bCoaxEnable;
+    buffer_u32[4] = sDevice.bI2SOutEnable;
     if(lfs_file_open(&lfs, &file, "cfgDevice", LFS_O_RDONLY) != 0) {
       printf("[NVM/ERR] Failed to open \"cfgDevice\" file.\n");
     } else {
-      lfs_file_read(&lfs, &file, buffer_u32, 12);
+      lfs_file_read(&lfs, &file, buffer_u32, 20);
       sDevice.bAutoMono = buffer_u32[1];
       sDevice.bSoftReboot = buffer_u32[2];
+      sDevice.bCoaxEnable = buffer_u32[3];
+      sDevice.bI2SOutEnable = buffer_u32[4];
       lfs_file_close(&lfs, &file);
     }
   }
@@ -384,6 +395,27 @@ void VolumeHandler(void)
       }
     }
     keyValue[KEY_RENC] = 0;
+  }
+}
+
+static void ApplyAudioOutputByDetect(uint8_t hpDet)
+{
+  if(hpDet == 1)  // headphone plugin
+  {
+    sTuner.Audio.index = 0;
+    gpio_bit_reset(GPIOC, GPIO_PIN_4);
+    gpio_bit_set(GPIOA, GPIO_PIN_6);
+    sTuner.Config.bForceMono = false;
+  }
+  else
+  {
+    sTuner.Audio.index = 1;
+    gpio_bit_reset(GPIOA, GPIO_PIN_6);
+    gpio_bit_set(GPIOC, GPIO_PIN_4);
+    if(sDevice.bAutoMono == true)
+      sTuner.Config.bForceMono = true;
+    else
+      sTuner.Config.bForceMono = false;
   }
 }
 
@@ -681,6 +713,7 @@ bool AddChannel(void)
     nChannel[nBandMode].chanFreq[0] = sTuner.Radio.nBandFreq[nBandMode];
     nChannel[nBandMode].chanNum++;
     nChannel[nBandMode].nowIndex = 0;
+    saveChannels(nBandMode);
     return true;
   }
   
@@ -719,7 +752,7 @@ bool DeleteChannel(uint8_t index)
   uint16_t nBandMode = sTuner.Radio.nBandMode;
   if(nChannel[nBandMode].chanNum == 0)  //empty memory
     return false;
-  if(index > nChannel[nBandMode].chanNum)  //index out of range
+  if(index == 0 || index > nChannel[nBandMode].chanNum)  //index out of range
     return false;
   
   nChannel[nBandMode].chanFreq[index-1] = 0;
@@ -727,9 +760,80 @@ bool DeleteChannel(uint8_t index)
   {
     nChannel[nBandMode].chanFreq[i] = nChannel[nBandMode].chanFreq[i+1];
   }
+  nChannel[nBandMode].chanFreq[nChannel[nBandMode].chanNum-1] = 0;
   nChannel[nBandMode].chanNum--;
+  if(nChannel[nBandMode].chanNum == 0)
+  {
+    nChannel[nBandMode].nowIndex = 0;
+  }
+  else if(nChannel[nBandMode].nowIndex > index-1)
+  {
+    nChannel[nBandMode].nowIndex--;
+  }
+  else if(nChannel[nBandMode].nowIndex >= nChannel[nBandMode].chanNum)
+  {
+    nChannel[nBandMode].nowIndex = nChannel[nBandMode].chanNum-1;
+  }
   saveChannels(nBandMode);
   return true;
+}
+
+static void MenuChannelManager(void)
+{
+  uint8_t band = sTuner.Radio.nBandMode;
+  int8_t index = 0;
+
+  if(nChannel[band].chanNum != 0)
+    index = inRangeInt(0, nChannel[band].chanNum-1, nChannel[band].nowIndex);
+
+  UI_ChannelManager(band, index);
+
+  while(1)
+  {
+    if(keyValue[KEY_UP] != 0)
+    {
+      keyValue[KEY_UP] = 0;
+      if(nChannel[band].chanNum != 0 && index > 0)
+      {
+        index--;
+        nChannel[band].nowIndex = index;
+      }
+      UI_ChannelManager(band, index);
+    }
+
+    if(keyValue[KEY_DOWN] != 0)
+    {
+      keyValue[KEY_DOWN] = 0;
+      if(nChannel[band].chanNum != 0 && index < nChannel[band].chanNum-1)
+      {
+        index++;
+        nChannel[band].nowIndex = index;
+      }
+      UI_ChannelManager(band, index);
+    }
+
+    if(keyValue[KEY_OK] != 0)
+    {
+      if(keyValue[KEY_OK] == KEY_LP && nChannel[band].chanNum != 0)
+      {
+        DeleteChannel(index+1);
+        if(nChannel[band].chanNum == 0)
+          index = 0;
+        else
+          index = inRangeInt(0, nChannel[band].chanNum-1, index);
+      }
+      keyValue[KEY_OK] = 0;
+      UI_ChannelManager(band, index);
+    }
+
+    if(keyValue[KEY_MENU] != 0)
+    {
+      flushKey();
+      break;
+    }
+
+    VolumeHandler();
+  }
 }
 
 
@@ -833,8 +937,8 @@ void MenuDisplay(void)
 void MenuAudio(void)
 {
   // vol, dc, eq, tone
-  const int8_t paraNum[MENU_AUDIO_INDEX] = {0,0,2,0};
-  const int8_t bandNum[MENU_AUDIO_INDEX] = {3,1,9,3};
+	  const int8_t paraNum[MENU_AUDIO_INDEX] = {0,0,2,0,0,0,0,0,0};
+	  const int8_t bandNum[MENU_AUDIO_INDEX] = {3,1,9,3,0,0,0,0,0};
   int8_t index = 0;
   int8_t paraSel = 0;
   int8_t bandSel = 0;
@@ -866,7 +970,8 @@ void MenuAudio(void)
     if(keyValue[KEY_LENC] != 0)
     {
       keyValue[KEY_LENC] = 0;
-      paraSel = inRangeLoop(0,paraNum[index]-1,paraSel,1);
+      if(paraNum[index] > 0)
+        paraSel = inRangeLoop(0,paraNum[index]-1,paraSel,1);
       UI_Audio(index,bandSel,paraSel,false);
     }
     
@@ -927,19 +1032,23 @@ void MenuAudio(void)
           setTone(sAudioTone, bandSel);
         };break;
         
-        case 4:{ // wave gen
+        case 4:{ // coax out
           
         };break;
         
-        case 5:{ // filter
+	        case 5:{ // i2s out
+	          
+	        };break;
+	        
+	        case 6:{ // filter
           
         };break;
         
-        case 6:{ // ALE
+	        case 7:{ // ALE
           
         };break;
         
-        case 7:{ // UltraBass
+	        case 8:{ // UltraBass
           sAudioKeyFunc.AUBGain = inRangeInt(0,24,sAudioKeyFunc.AUBGain+lcode);
           setUltraBassGain(sAudioKeyFunc.AUBGain);
         };break;
@@ -951,7 +1060,20 @@ void MenuAudio(void)
     if(keyValue[KEY_OK] != 0)
     {
       keyValue[KEY_OK] = 0;
-      bandSel = inRangeLoop(0,bandNum[index]-1,bandSel,1);
+      if(index == 4)
+      {
+        sDevice.bCoaxEnable = !sDevice.bCoaxEnable;
+        SetCoaxOutput(sDevice.bCoaxEnable);
+      }
+	      else if(index == 5)
+	      {
+	        sDevice.bI2SOutEnable = !sDevice.bI2SOutEnable;
+	        SetHostI2S0Output(sDevice.bI2SOutEnable);
+	      }
+      else if(bandNum[index] > 0)
+      {
+        bandSel = inRangeLoop(0,bandNum[index]-1,bandSel,1);
+      }
       UI_Audio(index,bandSel,paraSel,false);
     }
     if(keyValue[KEY_MENU] != 0)
@@ -1145,7 +1267,8 @@ void MenuSearch(void)
         case 3:{
         };break;
         case 4:{  // manage
-          
+          MenuChannelManager();
+          UI_Search(index,true);
         };break;
         case 5:{  // start
           SearchAllCH();
@@ -1370,7 +1493,7 @@ void MenuMain(void)
       switch(index)
       {
         case 0 :MenuDisplay(),saveSettings(CFG_DISP);break;
-        case 1 :MenuAudio(),saveSettings(CFG_AUDIO);break;
+        case 1 :MenuAudio(),saveSettings(CFG_AUDIO),saveSettings(CFG_DEVICE);break;
         case 2 :MenuRadio(),saveSettings(CFG_RADIO);break;//Radio
         case 3 :MenuSearch(),saveSettings(CFG_RADIO);break;//ATS
         case 4 :MenuDevice(),saveSettings(CFG_DEVICE),saveSettings(CFG_RADIO);break;
@@ -1567,24 +1690,9 @@ int main(void)
   RDS_Init(&sRDSData);
   
   nowDET = gpio_input_bit_get(GPIOA,GPIO_PIN_7);
-  if(nowDET == 1)  // headphone plugin
-  {
-    sTuner.Audio.index = 0;
-    gpio_bit_reset(GPIOC, GPIO_PIN_4);
-    gpio_bit_set(GPIOA, GPIO_PIN_6);
-    sTuner.Config.bForceMono = false;
-  }
-  else
-  {
-    sTuner.Audio.index = 1;
-    gpio_bit_reset(GPIOA, GPIO_PIN_6);
-    gpio_bit_set(GPIOC, GPIO_PIN_4);
-    if(sDevice.bAutoMono == true) {
-      sTuner.Config.bForceMono = true;
-    } else {
-      sTuner.Config.bForceMono = false;
-    }
-  }
+  ApplyAudioOutputByDetect(nowDET);
+  SetCoaxOutput(sDevice.bCoaxEnable);
+  SetHostI2S0Output(sDevice.bI2SOutEnable);
   lastDET = nowDET;
   
   SetFMStereoImprovement(sTuner.Config.bFMSI);
@@ -1744,24 +1852,9 @@ int main(void)
       sTuner.Audio.index = 1;
       SetVolume(sTuner.Audio.nVolume[sTuner.Audio.index]);
       nowDET = gpio_input_bit_get(GPIOA,GPIO_PIN_7);
-      if(nowDET == 1)  // headphone plugin
-      {
-        sTuner.Audio.index = 0;
-        gpio_bit_reset(GPIOC, GPIO_PIN_4);
-        gpio_bit_set(GPIOA, GPIO_PIN_6);
-        sTuner.Config.bForceMono = false;
-      }
-      else
-      {
-        sTuner.Audio.index = 1;
-        gpio_bit_reset(GPIOA, GPIO_PIN_6);
-        gpio_bit_set(GPIOC, GPIO_PIN_4);
-        if(sDevice.bAutoMono == true) {
-          sTuner.Config.bForceMono = true;
-        } else {
-          sTuner.Config.bForceMono = false;
-        }
-      }
+      ApplyAudioOutputByDetect(nowDET);
+      SetCoaxOutput(sDevice.bCoaxEnable);
+	      SetHostI2S0Output(sDevice.bI2SOutEnable);
       
       lastDET = nowDET;
       
@@ -1859,22 +1952,7 @@ void TIM_Callback(uint8_t tim)
       nowDET = gpio_input_bit_get(GPIOA,GPIO_PIN_7);
       if(nowDET != lastDET)
       {
-        if(nowDET == 1)  // headphone plugin
-        { 
-          sTuner.Audio.index = 0;
-          gpio_bit_reset(GPIOC, GPIO_PIN_4);
-          gpio_bit_set(GPIOA, GPIO_PIN_6);
-          sTuner.Config.bForceMono = false;
-        }
-        else
-        {
-          sTuner.Audio.index = 1;
-          gpio_bit_reset(GPIOA, GPIO_PIN_6);
-          gpio_bit_set(GPIOC, GPIO_PIN_4);
-          if(sDevice.bAutoMono == true) {
-            sTuner.Config.bForceMono = true;
-          }
-        }
+        ApplyAudioOutputByDetect(nowDET);
         lastDET = nowDET;
       }
     }

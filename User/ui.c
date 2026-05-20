@@ -6,6 +6,7 @@
 #include "Dirana3BasicDSP.h"
 #include "font.h"
 #include "func.h"
+#include <stdio.h>
 #include <math.h>
 
 /*************************************EXTERN***********************************/
@@ -49,12 +50,13 @@ const char menuDetail[6][41] = {
 };
 
 // Audio
-const char audioTitle[8][11] = {
+const char audioTitle[9][11] = {
   {"Vol & Bal"},
   {"DC Block"},
   {"Equalizer"},
   {"Tone"},
-  {"Wave Gen"},
+  {"COAX OUT"},
+	  {"I2S OUT"},
   {"Filter"},
   {"AutoLE"},
   {"UltraBass"},
@@ -173,6 +175,59 @@ void UI_DrawScrollBar(uint8_t totalNum, uint8_t nowPos)
     tmp = tmp - 9 + 'A';
   GUI_Char(250,86,tmp,&Font8,COLOR_BLACK,COLOR_WHITE);
   lastPos = nowPos;
+}
+
+static void FormatChannelLabel(uint8_t band, uint8_t chIndex, char* text, uint8_t textSize)
+{
+  uint16_t freq = nChannel[band].chanFreq[chIndex];
+  if(band == BAND_FM)
+    snprintf(text, textSize, "%02u  %u.%02uMHz", chIndex+1, freq/100, freq%100);
+  else
+    snprintf(text, textSize, "%02u  %ukHz", chIndex+1, freq);
+}
+
+void UI_ChannelManager(uint8_t band, int8_t index)
+{
+  char line[24] = {0};
+  uint8_t total = nChannel[band].chanNum;
+  uint8_t start = 0;
+  uint8_t cursor = 0;
+  uint8_t drawIndex = 0;
+  uint8_t y = 0;
+
+  GUI_ClearBuff(COLOR_WHITE);
+  GUI_Text(72,0,184,16,"Manage Memory",&Font16,COLOR_BLACK,COLOR_WHITE);
+  GUI_Text(8,14,246,22,"UP/DN Select  Hold OK Delete",&Font8,COLOR_DARK,COLOR_WHITE);
+
+  if(total == 0)
+  {
+    GUI_Text(44,38,220,58,"No saved channel",&Font20,COLOR_BLACK,COLOR_WHITE);
+    GUI_Text(78,68,210,80,"MENU Back",&Font12,COLOR_DARK,COLOR_WHITE);
+    GUI_FillBuff(248,0,8,96,COLOR_WHITE);
+    return;
+  }
+
+  if(index < 0)
+    index = 0;
+  else if(index >= total)
+    index = total-1;
+
+  start = (index/4)*4;
+  for(cursor = 0; cursor < 4; cursor++)
+  {
+    y = 24 + cursor*18;
+    drawIndex = start + cursor;
+    GUI_FillBuff(0,y,248,16,drawIndex == index ? COLOR_LIGHT : COLOR_WHITE);
+    if(drawIndex >= total)
+      continue;
+
+    FormatChannelLabel(band, drawIndex, line, sizeof(line));
+    if(drawIndex == index)
+      GUI_FillBuff(0,y,4,16,COLOR_BLACK);
+    GUI_Text(8,y,240,y+16,line,&Font16,COLOR_BLACK,drawIndex == index ? COLOR_LIGHT : COLOR_WHITE);
+  }
+
+  UI_DrawScrollBar(total, index);
 }
 
 
@@ -952,19 +1007,23 @@ void UI_Audio(int8_t index, int8_t band, int8_t sel, bool init)
         UI_DrawTone(band);
       };break;
       
-      case 4:{ // wave gen
+      case 4:{ // coax out
+        UI_DrawCheckBox(1,img_commonSet20x,"Coax Output",true,sDevice.bCoaxEnable);
+      };break;
+      
+	      case 5:{ // i2s out
+	        UI_DrawCheckBox(1,img_commonSet20x,"Host I2S0 Out",true,sDevice.bI2SOutEnable);
+	      };break;
+	      
+	      case 6:{ // filter
         
       };break;
       
-      case 5:{ // filter
+	      case 7:{ // ALE
         
       };break;
       
-      case 6:{ // ALE
-        
-      };break;
-      
-      case 7:{ // Ultra Bass
+	      case 8:{ // Ultra Bass
         GUI_DrawBuff(8,24+2,44,44,MODE_GREY,0,0,img_ultraBass44x44);
         GUI_Text(8+44+8, 24+2, 256,24+2+20,"Adaptive UltraBass",&Font20,COLOR_BLACK,COLOR_WHITE);
         GUI_Text(8+44+8, 48+2, 256,48+2+20,"[0 ~ 24] 1dB/div",&Font20,COLOR_BLACK,COLOR_WHITE);
@@ -995,19 +1054,23 @@ void UI_Audio(int8_t index, int8_t band, int8_t sel, bool init)
       UI_DrawTone(band);
     };break;
     
-    case 4:{ // wave gen
+    case 4:{ // coax out
+      UI_DrawCheckBox(1,img_commonSet20x,"Coax Output",true,sDevice.bCoaxEnable);
+    };break;
+    
+	    case 5:{ // i2s out
+	      UI_DrawCheckBox(1,img_commonSet20x,"Host I2S0 Out",true,sDevice.bI2SOutEnable);
+	    };break;
+	    
+	    case 6:{ // filter
       
     };break;
     
-    case 5:{ // filter
+	    case 7:{ // ALE
       
     };break;
     
-    case 6:{ // ALE
-      
-    };break;
-    
-    case 7:{ // UltraBass
+	    case 8:{ // UltraBass
       UI_DrawFloat(72,sAudioKeyFunc.AUBGain,1,"dB");
     };break;
   }

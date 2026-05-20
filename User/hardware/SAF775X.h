@@ -203,6 +203,8 @@ void SwitchBand(uint8_t band);
 
 void TunerStructInit(struct Dirana3Radio* init, bool initPara);
 void TunerInit(void);
+void SetCoaxOutput(bool on);
+void SetHostI2S0Output(bool on);
 
 
 
