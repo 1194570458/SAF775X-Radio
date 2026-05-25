@@ -74,8 +74,8 @@ struct device sDevice = {
   .bSoftReboot=true,
   .sInfo.pid[0]=15,  // flash arrange
   .sInfo.pid[1]=2,  // version
-  .sInfo.pid[2]=6,  // subversion
-  .sInfo.pid[3]=20260420
+  .sInfo.pid[2]=7,  // subversion
+  .sInfo.pid[3]=20260525
 };
 
 lfs_t lfs;
