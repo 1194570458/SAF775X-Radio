@@ -411,7 +411,10 @@ static void ApplyAudioOutputByDetect(uint8_t hpDet)
   {
     sTuner.Audio.index = 1;
     gpio_bit_reset(GPIOA, GPIO_PIN_6);
-    gpio_bit_set(GPIOC, GPIO_PIN_4);
+    if(sDevice.bCoaxEnable == false && sDevice.bI2SOutEnable == false)
+      gpio_bit_set(GPIOC, GPIO_PIN_4);
+    else
+      gpio_bit_reset(GPIOC, GPIO_PIN_4);
     if(sDevice.bAutoMono == true)
       sTuner.Config.bForceMono = true;
     else
@@ -1064,11 +1067,13 @@ void MenuAudio(void)
       {
         sDevice.bCoaxEnable = !sDevice.bCoaxEnable;
         SetCoaxOutput(sDevice.bCoaxEnable);
+        ApplyAudioOutputByDetect(gpio_input_bit_get(GPIOA, GPIO_PIN_7));
       }
 	      else if(index == 5)
 	      {
 	        sDevice.bI2SOutEnable = !sDevice.bI2SOutEnable;
 	        SetHostI2S0Output(sDevice.bI2SOutEnable);
+          ApplyAudioOutputByDetect(gpio_input_bit_get(GPIOA, GPIO_PIN_7));
 	      }
       else if(bandNum[index] > 0)
       {
