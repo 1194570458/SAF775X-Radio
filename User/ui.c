@@ -173,6 +173,9 @@ void UI_DrawScrollBar(uint8_t totalNum, uint8_t nowPos)
     tmp = tmp + '1';
   else
     tmp = tmp - 9 + 'A';
+  if(tmp > 'Z')
+    tmp = '+';
+  
   GUI_Char(250,86,tmp,&Font8,COLOR_BLACK,COLOR_WHITE);
   lastPos = nowPos;
 }
@@ -181,9 +184,9 @@ static void FormatChannelLabel(uint8_t band, uint8_t chIndex, char* text, uint8_
 {
   uint16_t freq = nChannel[band].chanFreq[chIndex];
   if(band == BAND_FM)
-    snprintf(text, textSize, "%02u  %u.%02uMHz", chIndex+1, freq/100, freq%100);
+    snprintf(text, textSize, "%02u. %u.%02uMHz", chIndex+1, freq/100, freq%100);
   else
-    snprintf(text, textSize, "%02u  %ukHz", chIndex+1, freq);
+    snprintf(text, textSize, "%02u. %ukHz", chIndex+1, freq);
 }
 
 void UI_ChannelManager(uint8_t band, int8_t index)
@@ -207,10 +210,7 @@ void UI_ChannelManager(uint8_t band, int8_t index)
     return;
   }
 
-  if(index < 0)
-    index = 0;
-  else if(index >= total)
-    index = total-1;
+  index = inRangeInt(0, total-1, index);
 
   start = (index/4)*4;
   for(cursor = 0; cursor < 4; cursor++)
@@ -1177,7 +1177,7 @@ void UI_Search(int8_t index, bool init)
     case 1 :UI_DrawTextBox(1,img_commonSet20x,"ATS Mode",true,atsTitle[sTuner.ATS.nATSMode]);break;
     case 2 :UI_DrawValueBox(2,img_commonSet20x,"Threshold",true,sTuner.ATS.nSigThreshold,"dBuV");break;
     case 3 :UI_DrawValueBox(3,img_commonSet20x,"MW Step",true,sTuner.ATS.nMWStep,"K");break;
-    case 4 :UI_DrawCheckBox(0,img_commonSet20x,"Manage Memory",false,false);break;
+    case 4 :UI_DrawCheckBox(0,img_commonSet20x,"Manage Memory",true,false);break;
     case 5 :UI_DrawCheckBox(1,img_commonSet20x,"Start Search CH",true,false);break;
     default : break;
   }

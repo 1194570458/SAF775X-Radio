@@ -74,7 +74,7 @@ struct device sDevice = {
   .bSoftReboot=true,
   .sInfo.pid[0]=15,  // flash arrange
   .sInfo.pid[1]=2,  // version
-  .sInfo.pid[2]=7,  // subversion
+  .sInfo.pid[2]=8,  // subversion
   .sInfo.pid[3]=20260525
 };
 
@@ -349,6 +349,10 @@ void AdjustFreq(int8_t dir)
   
   
   RDS_Refresh();
+}
+
+void GoFreq(uint16_t freq) {
+  TuneFreq(freq, (sTuner.Radio.nBandMode == BAND_FM)? Jump : Preset);
 }
 
 void AdjustFilter(int8_t dir)
@@ -631,7 +635,7 @@ void SearchAllCH()
       GUI_SeekALL(fmin,fmax,cursorFreq,nChannel[nBandMode].chanNum,false);
       cursorFreq = cursorFreq + nBandStepATS[nBandMode];
       
-      if(keyValue[KEY_MENU] != 0 || nChannel[nBandMode].chanNum == nChannel[nBandMode].chanMax)  //ʖ¶¯͋³ö»򴦂ú
+      if(keyValue[KEY_MENU] != 0 || nChannel[nBandMode].chanNum == nChannel[nBandMode].chanMax)  //
       {
         keyValue[KEY_MENU] = 0;
         break;
@@ -696,12 +700,7 @@ void GoChannel(int8_t dir)
       }
     }
     
-    sTuner.Radio.nBandFreq[nBandMode] = nChannel[nBandMode].chanFreq[nChannel[nBandMode].nowIndex];
-    if(nBandMode == BAND_FM)
-      TuneFreq(sTuner.Radio.nBandFreq[nBandMode], Jump);
-    else
-      TuneFreq(sTuner.Radio.nBandFreq[nBandMode], Preset);
-    
+    GoFreq(nChannel[nBandMode].chanFreq[nChannel[nBandMode].nowIndex]);
   }
 }
 
@@ -749,27 +748,28 @@ bool AddChannel(void)
   return true;
 }
 
-// index 1--nChannel[nBandMode].chanNum
+// index 0 -- nChannel[nBandMode].chanNum-1
 bool DeleteChannel(uint8_t index)
 {
   uint16_t nBandMode = sTuner.Radio.nBandMode;
-  if(nChannel[nBandMode].chanNum == 0)  //empty memory
-    return false;
-  if(index == 0 || index > nChannel[nBandMode].chanNum)  //index out of range
+  if(index >= nChannel[nBandMode].chanNum)  //index out of range | empty memory
     return false;
   
-  nChannel[nBandMode].chanFreq[index-1] = 0;
-  for(uint8_t i = index-1;i<nChannel[nBandMode].chanNum-1;i++)
+  nChannel[nBandMode].chanFreq[index] = 0;
+  for(uint8_t i = index;i<nChannel[nBandMode].chanNum-1;i++)
   {
     nChannel[nBandMode].chanFreq[i] = nChannel[nBandMode].chanFreq[i+1];
   }
+  
+  // Clear last one & modify Channel Number
   nChannel[nBandMode].chanFreq[nChannel[nBandMode].chanNum-1] = 0;
   nChannel[nBandMode].chanNum--;
+
   if(nChannel[nBandMode].chanNum == 0)
   {
     nChannel[nBandMode].nowIndex = 0;
   }
-  else if(nChannel[nBandMode].nowIndex > index-1)
+  else if(nChannel[nBandMode].nowIndex > index)
   {
     nChannel[nBandMode].nowIndex--;
   }
@@ -777,14 +777,16 @@ bool DeleteChannel(uint8_t index)
   {
     nChannel[nBandMode].nowIndex = nChannel[nBandMode].chanNum-1;
   }
-  saveChannels(nBandMode);
   return true;
 }
 
 static void MenuChannelManager(void)
 {
   uint8_t band = sTuner.Radio.nBandMode;
+  uint16_t fieldFreq = sTuner.Radio.nBandFreq[band];
+  
   int8_t index = 0;
+  uint32_t modifyC = 0;
 
   if(nChannel[band].chanNum != 0)
     index = inRangeInt(0, nChannel[band].chanNum-1, nChannel[band].nowIndex);
@@ -799,7 +801,7 @@ static void MenuChannelManager(void)
       if(nChannel[band].chanNum != 0 && index > 0)
       {
         index--;
-        nChannel[band].nowIndex = index;
+        GoFreq(nChannel[band].chanFreq[index]);
       }
       UI_ChannelManager(band, index);
     }
@@ -810,7 +812,7 @@ static void MenuChannelManager(void)
       if(nChannel[band].chanNum != 0 && index < nChannel[band].chanNum-1)
       {
         index++;
-        nChannel[band].nowIndex = index;
+        GoFreq(nChannel[band].chanFreq[index]);
       }
       UI_ChannelManager(band, index);
     }
@@ -819,11 +821,13 @@ static void MenuChannelManager(void)
     {
       if(keyValue[KEY_OK] == KEY_LP && nChannel[band].chanNum != 0)
       {
-        DeleteChannel(index+1);
+        modifyC += DeleteChannel(index);
         if(nChannel[band].chanNum == 0)
           index = 0;
-        else
+        else {
           index = inRangeInt(0, nChannel[band].chanNum-1, index);
+          GoFreq(nChannel[band].chanFreq[index]);
+        }
       }
       keyValue[KEY_OK] = 0;
       UI_ChannelManager(band, index);
@@ -831,6 +835,10 @@ static void MenuChannelManager(void)
 
     if(keyValue[KEY_MENU] != 0)
     {
+      if(modifyC != 0) {
+        saveChannels(band);
+      }
+      GoFreq(fieldFreq);
       flushKey();
       break;
     }
