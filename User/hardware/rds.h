@@ -1,3 +1,6 @@
+#ifndef __RDS_H__
+#define __RDS_H__
+
 #include "stdint.h"
 #include "stdbool.h"
 
@@ -52,4 +55,5 @@ void DecodeRDS(struct RDSBuffer *rawdata);
 
 
 
+#endif
 

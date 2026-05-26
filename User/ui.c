@@ -8,6 +8,7 @@
 #include "func.h"
 #include <stdio.h>
 #include <math.h>
+#include <string.h>
 
 /*************************************EXTERN***********************************/
 
@@ -163,7 +164,7 @@ void stroffset(uint8_t* str, uint8_t length)
 void UI_DrawScrollBar(uint8_t totalNum, uint8_t nowPos)
 {
   static uint8_t lastPos = 0;
-  char tmp = nowPos;
+  uint16_t tmp = nowPos;
   if(lastPos != nowPos) // clear last pos
     GUI_Line_VH(251, 8+80*lastPos/totalNum, DIR_V, 8, 4, COLOR_WHITE);
   // draw scroll bar
@@ -189,7 +190,38 @@ static void FormatChannelLabel(uint8_t band, uint8_t chIndex, char* text, uint8_
     snprintf(text, textSize, "%02u. %ukHz", chIndex+1, freq);
 }
 
-void UI_ChannelManager(uint8_t band, int8_t index)
+static void DrawMainCounter16(uint16_t xr, uint8_t y, uint16_t value)
+{
+  uint8_t len = 0;
+  uint8_t str[4] = {0};
+
+  len = num2str(value, str);
+  GUI_DrawBuff_Origin(xr, y, 8, 16, img_num16x+32*str[len-1]);
+  if(len >= 2)
+    GUI_DrawBuff_Origin(xr-8, y, 8, 16, img_num16x+32*str[len-2]);
+  else
+    GUI_FillBuff_Origin(xr-8, y, 8, 16, 0x00);
+  if(len >= 3)
+    GUI_DrawBuff_Origin(xr-16, y, 8, 16, img_num16x+32*str[len-3]);
+  else
+    GUI_FillBuff_Origin(xr-16, y, 8, 16, 0x00);
+}
+
+static void DrawMainCounter12(uint16_t x, uint8_t y, uint16_t value)
+{
+  uint8_t len = 0;
+  uint8_t str[4] = {0};
+  char text[4] = {' ', ' ', ' ', 0};
+
+  len = num2str(value, str);
+  stroffset(str, len);
+  memcpy(&text[3-len], str, len);
+
+  GUI_FillBuff(x, y, Font12.Width*3, Font12.Height, COLOR_WHITE);
+  GUI_Text(x, y, x+Font12.Width*3, y+Font12.Height, text, &Font12, COLOR_BLACK, COLOR_WHITE);
+}
+
+void UI_ChannelManager(uint8_t band, int16_t index)
 {
   char line[24] = {0};
   uint8_t total = nChannel[band].chanNum;
@@ -726,20 +758,13 @@ void UI_Main(bool init)
     
     if(sDisplay.emiFree == true)
     {
-      GUI_DrawBuff_Origin(140,80,8,16,img_num16x+32*((vchan+1)/10));
-      GUI_DrawBuff_Origin(148,80,8,16,img_num16x+32*((vchan+1)%10));
-      
-      GUI_DrawBuff_Origin(164,80,8,16,img_num16x+32*(vchannum/10));
-      GUI_DrawBuff_Origin(172,80,8,16,img_num16x+32*(vchannum%10));
+      DrawMainCounter16(148, 80, vchan+1);
+      DrawMainCounter16(180, 80, vchannum);
     }
     else
     {
-      //GUI_FillBuff_Origin(0,48,36,16,COLOR_WHITE);
-      GUI_Char(22,50,((vchan+1)/10)+'0',&Font12,COLOR_BLACK,COLOR_WHITE);
-      GUI_Char(29,50,((vchan+1)%10)+'0',&Font12,COLOR_BLACK,COLOR_WHITE);
-      
-      GUI_Char(43,50,(vchannum/10)+'0',&Font12,COLOR_BLACK,COLOR_WHITE);
-      GUI_Char(50,50,(vchannum%10)+'0',&Font12,COLOR_BLACK,COLOR_WHITE);
+      DrawMainCounter12(15, 50, vchan+1);
+      DrawMainCounter12(43, 50, vchannum);
     }
   }
   

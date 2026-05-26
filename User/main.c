@@ -75,7 +75,7 @@ struct device sDevice = {
   .sInfo.pid[0]=15,  // flash arrange
   .sInfo.pid[1]=2,  // version
   .sInfo.pid[2]=8,  // subversion
-  .sInfo.pid[3]=20260525
+  .sInfo.pid[3]=20260526
 };
 
 lfs_t lfs;
@@ -247,14 +247,24 @@ void readChannels(uint8_t band)
     return;
   lfs_file_t file;
   CHANNEL tmp = {0};
+  lfs_ssize_t readLen = 0;
   
   if(lfs_file_open(&lfs, &file, bandDbName[band], LFS_O_RDONLY) != 0) {
     printf("[NVM/ERR] Failed to open \"%s\" file.\n", bandDbName[band]);
   } else {
-    lfs_file_read(&lfs, &file, &tmp, sizeof(CHANNEL));
+    readLen = lfs_file_read(&lfs, &file, &tmp, sizeof(CHANNEL));
     lfs_file_close(&lfs, &file);
-    if(tmp.chanNum > 0 && tmp.chanNum <= nChannel[band].chanMax) {
+    if(readLen >= 0 && tmp.chanNum <= nChannel[band].chanMax) {
+      uint8_t chanMax = nChannel[band].chanMax;
       memcpy(&nChannel[band], &tmp, sizeof(CHANNEL));
+      nChannel[band].chanMax = chanMax;
+      if(nChannel[band].chanNum == 0) {
+        nChannel[band].nowIndex = 0;
+      } else {
+        nChannel[band].nowIndex = inRangeInt(0, nChannel[band].chanNum-1, nChannel[band].nowIndex);
+      }
+    } else if(readLen < 0) {
+      printf("[NVM/ERR] Failed to read \"%s\" file.\n", bandDbName[band]);
     }
   }
 }
@@ -659,7 +669,7 @@ void SearchAllCH()
 
 void GoChannel(int8_t dir)
 {
-  int8_t index = 0;
+  int16_t index = 0;
   uint8_t flag = 0;
   uint16_t nBandMode = sTuner.Radio.nBandMode;
   
@@ -785,7 +795,7 @@ static void MenuChannelManager(void)
   uint8_t band = sTuner.Radio.nBandMode;
   uint16_t fieldFreq = sTuner.Radio.nBandFreq[band];
   
-  int8_t index = 0;
+  int16_t index = 0;
   uint32_t modifyC = 0;
 
   if(nChannel[band].chanNum != 0)

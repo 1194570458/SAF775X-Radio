@@ -40,6 +40,7 @@ OF SUCH DAMAGE.
 
 #include "stdbool.h"
 #include "gd32f30x.h"
+#include "SAF775X.h"
 
 #define MENU_MAIN_INDEX    6
 #define MENU_DISP_INDEX    7
@@ -93,7 +94,7 @@ typedef struct {
   uint8_t chanMax;
   uint8_t chanNum;
   uint8_t nowIndex;
-  uint16_t chanFreq[100];
+  uint16_t chanFreq[CHS_MAX];
 }CHANNEL;
 
 extern struct device sDevice;
