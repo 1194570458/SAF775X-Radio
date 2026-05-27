@@ -574,7 +574,7 @@ void UI_Main(bool init)
     GUI_DrawBuff_Origin(238,80,16,16,img_degree);
     
     if(sDisplay.emiFree == true) {
-      GUI_DrawBuff_Origin(124,80,16,16,img_channel);
+      GUI_DrawBuff_Origin(114,80,16,16,img_channel);
       GUI_DrawBuff_Origin(156,80,8,16,img_num16x+352);
       
       GUI_DrawBuff_Origin(64,72,126,8,img_scale);

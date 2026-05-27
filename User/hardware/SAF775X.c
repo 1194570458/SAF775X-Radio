@@ -896,12 +896,21 @@ void SetCoaxOutput(bool on)
 {
 	if(on)
 	{
-		// Route local processed audio to SPDIF output.
-		// SPDIFxOutpntr is a stereo pointer, so FrontOutL routes FrontOutL/FrontOutR.
+		// Route the currently active analog output path to SPDIF output so coax
+		// follows the user's active volume path while analog behavior stays unchanged.
+		// SPDIFxOutpntr is a stereo pointer.
 		// UM SAF775x 2.3.3, Table 28:
 		// SPDIF output mode 0 -> Transmit enable, Bypass off.
-		Set_ADSP(ADSP_X_SPDIF0Outpntr, ADSP_X_FrontOutL_REL);
-		Set_ADSP(ADSP_X_SPDIF1Outpntr, ADSP_X_FrontOutL_REL);
+		if(sys->Audio.index == 0)
+		{
+			Set_ADSP(ADSP_X_SPDIF0Outpntr, ADSP_X_FrontOutL_REL);
+			Set_ADSP(ADSP_X_SPDIF1Outpntr, ADSP_X_FrontOutL_REL);
+		}
+		else
+		{
+			Set_ADSP(ADSP_X_SPDIF0Outpntr, ADSP_X_RearOutL_REL);
+			Set_ADSP(ADSP_X_SPDIF1Outpntr, ADSP_X_RearOutL_REL);
+		}
 		Set_REGFree(3, 0xA9, 0x22, 0x00);
 		Set_REGFree(3, 0xA9, 0x23, 0x00);
 	}
