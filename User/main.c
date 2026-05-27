@@ -69,11 +69,13 @@ struct lfsAudioCfg {
 
 struct device sDevice = {
   .bAutoMono=true,
+  .bCoaxEnable=false,
+  .bI2SOutEnable=false,
   .bSoftReboot=true,
   .sInfo.pid[0]=15,  // flash arrange
   .sInfo.pid[1]=2,  // version
-  .sInfo.pid[2]=7,  // subversion
-  .sInfo.pid[3]=20260519
+  .sInfo.pid[2]=8,  // subversion
+  .sInfo.pid[3]=20260526
 };
 
 lfs_t lfs;
@@ -125,31 +127,77 @@ CHANNEL nChannel[NUM_BANDS] = {
 
 char bandDbName[NUM_BANDS][7] = {"bandFm", "bandLw", "bandMw", "bandSw"};
 
-void saveSettings(uint8_t cfgID)
+#define DEVICE_CFG_WORDS 5
+
+static bool writeConfigFile(const char *path, const void *data, lfs_size_t size)
 {
   lfs_file_t file;
-  uint32_t buffer_u32[8];
+  lfs_ssize_t writeLen;
+  int closeErr;
+
+  if(lfs_file_open(&lfs, &file, path, LFS_O_WRONLY | LFS_O_CREAT | LFS_O_TRUNC) != 0) {
+    printf("[NVM/ERR] Failed to open \"%s\" file for write.\n", path);
+    return false;
+  }
+
+  writeLen = lfs_file_write(&lfs, &file, data, size);
+  closeErr = lfs_file_close(&lfs, &file);
+
+  if(writeLen != (lfs_ssize_t)size) {
+    printf("[NVM/ERR] Failed to write \"%s\" file (%d/%d).\n", path, (int)writeLen, (int)size);
+    return false;
+  }
+  if(closeErr != 0) {
+    printf("[NVM/ERR] Failed to close \"%s\" file (%d).\n", path, closeErr);
+    return false;
+  }
+
+  return true;
+}
+
+static lfs_ssize_t readConfigFile(const char *path, void *data, lfs_size_t size)
+{
+  lfs_file_t file;
+  lfs_ssize_t readLen;
+  int closeErr;
+
+  if(lfs_file_open(&lfs, &file, path, LFS_O_RDONLY) != 0) {
+    printf("[NVM/ERR] Failed to open \"%s\" file.\n", path);
+    return -1;
+  }
+
+  readLen = lfs_file_read(&lfs, &file, data, size);
+  closeErr = lfs_file_close(&lfs, &file);
+
+  if(readLen < 0) {
+    printf("[NVM/ERR] Failed to read \"%s\" file (%d).\n", path, (int)readLen);
+  } else if(closeErr != 0) {
+    printf("[NVM/ERR] Failed to close \"%s\" file (%d).\n", path, closeErr);
+  }
+
+  return readLen;
+}
+
+void saveSettings(uint8_t cfgID)
+{
+  uint32_t buffer_u32[DEVICE_CFG_WORDS] = {0};
   
   if(cfgID == CFG_DEVICE || cfgID == CFG_ALL) {
     buffer_u32[0] = sDevice.sInfo.pid[0];
     buffer_u32[1] = sDevice.bAutoMono;
     buffer_u32[2] = sDevice.bSoftReboot;
+    buffer_u32[3] = sDevice.bCoaxEnable;
+    buffer_u32[4] = sDevice.bI2SOutEnable;
     
-    lfs_file_open(&lfs, &file, "cfgDevice", LFS_O_WRONLY | LFS_O_CREAT);
-    lfs_file_write(&lfs, &file, buffer_u32, 12);
-    lfs_file_close(&lfs, &file);
+    writeConfigFile("cfgDevice", buffer_u32, sizeof(buffer_u32));
   }
   
   if(cfgID == CFG_RADIO || cfgID == CFG_ALL) {
-    lfs_file_open(&lfs, &file, "cfgTuner", LFS_O_WRONLY | LFS_O_CREAT);
-    lfs_file_write(&lfs, &file, &sTuner, sizeof(sTuner));
-    lfs_file_close(&lfs, &file);
+    writeConfigFile("cfgTuner", &sTuner, sizeof(sTuner));
   }
   
   if(cfgID == CFG_DISP || cfgID == CFG_ALL) {
-    lfs_file_open(&lfs, &file, "cfgDisplay", LFS_O_WRONLY | LFS_O_CREAT);
-    lfs_file_write(&lfs, &file, &sDisplay, sizeof(sDisplay));
-    lfs_file_close(&lfs, &file);
+    writeConfigFile("cfgDisplay", &sDisplay, sizeof(sDisplay));
   }
   
   if(cfgID == CFG_AUDIO || cfgID == CFG_ALL) {
@@ -160,61 +208,62 @@ void saveSettings(uint8_t cfgID)
       .tone = sAudioTone,
       .keyf = sAudioKeyFunc
     };
-    lfs_file_open(&lfs, &file, "cfgAudio", LFS_O_WRONLY | LFS_O_CREAT);
-    lfs_file_write(&lfs, &file, &t, sizeof(t));
-    lfs_file_close(&lfs, &file);
+    writeConfigFile("cfgAudio", &t, sizeof(t));
   }
   
 }
 
 void readSettings(uint8_t cfgID)
 {
-  lfs_file_t file;
-  uint32_t buffer_u32[8];
-  int needUpdate = 0;
+  uint32_t buffer_u32[DEVICE_CFG_WORDS] = {0};
+  lfs_ssize_t readLen = 0;
   
   if(cfgID == CFG_DEVICE || cfgID == CFG_ALL) {
-    if(lfs_file_open(&lfs, &file, "cfgDevice", LFS_O_RDONLY) != 0) {
-      printf("[NVM/ERR] Failed to open \"cfgDevice\" file.\n");
-    } else {
-      lfs_file_read(&lfs, &file, buffer_u32, 12);
+    readLen = readConfigFile("cfgDevice", buffer_u32, sizeof(buffer_u32));
+    if(readLen >= (lfs_ssize_t)(3 * sizeof(uint32_t))) {
       sDevice.bAutoMono = buffer_u32[1];
       sDevice.bSoftReboot = buffer_u32[2];
-      lfs_file_close(&lfs, &file);
+    }
+    if(readLen >= (lfs_ssize_t)(4 * sizeof(uint32_t))) {
+      sDevice.bCoaxEnable = buffer_u32[3];
+    }
+    if(readLen >= (lfs_ssize_t)(5 * sizeof(uint32_t))) {
+      sDevice.bI2SOutEnable = buffer_u32[4];
     }
   }
   
   if(cfgID == CFG_RADIO || cfgID == CFG_ALL) {
-    if(lfs_file_open(&lfs, &file, "cfgTuner", LFS_O_RDONLY) != 0) {
-      printf("[NVM/ERR] Failed to open \"cfgTuner\" file.\n");
-    } else {
-      lfs_file_read(&lfs, &file, &sTuner, sizeof(sTuner));
-      lfs_file_close(&lfs, &file);
+    struct Dirana3Radio tunerCfg = {0};
+    readLen = readConfigFile("cfgTuner", &tunerCfg, sizeof(tunerCfg));
+    if(readLen == (lfs_ssize_t)sizeof(tunerCfg)) {
+      sTuner = tunerCfg;
+      nBandStepATS[BAND_MW] = sTuner.ATS.nMWStep;
+    } else if(readLen > 0) {
+      printf("[NVM/WARN] Unexpected \"cfgTuner\" size: %d/%d.\n", (int)readLen, (int)sizeof(tunerCfg));
     }
   }
   
   if(cfgID == CFG_DISP || cfgID == CFG_ALL) {
-    if(lfs_file_open(&lfs, &file, "cfgDisplay", LFS_O_RDONLY) != 0) {
-      printf("[NVM/ERR] Failed to open \"cfgDisplay\" file.\n");
-    } else {
-      lfs_file_read(&lfs, &file, &sDisplay, sizeof(sDisplay));
-      lfs_file_close(&lfs, &file);
+    struct displayConfig displayCfg = {0};
+    readLen = readConfigFile("cfgDisplay", &displayCfg, sizeof(displayCfg));
+    if(readLen == (lfs_ssize_t)sizeof(displayCfg)) {
+      sDisplay = displayCfg;
+    } else if(readLen > 0) {
+      printf("[NVM/WARN] Unexpected \"cfgDisplay\" size: %d/%d.\n", (int)readLen, (int)sizeof(displayCfg));
     }
   }
   
   if(cfgID == CFG_AUDIO || cfgID == CFG_ALL) {
-    struct lfsAudioCfg t;
-    if(lfs_file_open(&lfs, &file, "cfgAudio", LFS_O_RDONLY) != 0) {
-      printf("[NVM/ERR] Failed to open \"cfgAudio\" file.\n");
-    } else {
-      lfs_file_read(&lfs, &file, &t, sizeof(t));
-      lfs_file_close(&lfs, &file);
-      
+    struct lfsAudioCfg t = {0};
+    readLen = readConfigFile("cfgAudio", &t, sizeof(t));
+    if(readLen == (lfs_ssize_t)sizeof(t)) {
       sAudioBasic = t.basic;
       sAudioTone = t.tone;
       sAudioEQ = t.geq;
       sAudioFilter = t.filter;
       sAudioKeyFunc = t.keyf;
+    } else if(readLen > 0) {
+      printf("[NVM/WARN] Unexpected \"cfgAudio\" size: %d/%d.\n", (int)readLen, (int)sizeof(t));
     }
   }
 }
@@ -223,34 +272,34 @@ void saveChannels(uint8_t band)
 {
   if(band >= NUM_BANDS)
     return;
-  lfs_file_t file;
   
-  lfs_file_open(&lfs, &file, bandDbName[band], LFS_O_WRONLY | LFS_O_CREAT);
-  lfs_file_write(&lfs, &file, &nChannel[band], sizeof(CHANNEL));
-  lfs_file_close(&lfs, &file);
+  writeConfigFile(bandDbName[band], &nChannel[band], sizeof(CHANNEL));
 }
 
 void readChannels(uint8_t band)
 {
   if(band >= NUM_BANDS)
     return;
-  lfs_file_t file;
   CHANNEL tmp = {0};
+  lfs_ssize_t readLen = 0;
   
-  if(lfs_file_open(&lfs, &file, bandDbName[band], LFS_O_RDONLY) != 0) {
-    printf("[NVM/ERR] Failed to open \"%s\" file.\n", bandDbName[band]);
-  } else {
-    lfs_file_read(&lfs, &file, &tmp, sizeof(CHANNEL));
-    lfs_file_close(&lfs, &file);
-    if(tmp.chanNum > 0 && tmp.chanNum <= nChannel[band].chanMax) {
-      memcpy(&nChannel[band], &tmp, sizeof(CHANNEL));
+  readLen = readConfigFile(bandDbName[band], &tmp, sizeof(CHANNEL));
+  if(readLen == (lfs_ssize_t)sizeof(CHANNEL) && tmp.chanNum <= nChannel[band].chanMax) {
+    uint8_t chanMax = nChannel[band].chanMax;
+    memcpy(&nChannel[band], &tmp, sizeof(CHANNEL));
+    nChannel[band].chanMax = chanMax;
+    if(nChannel[band].chanNum == 0) {
+      nChannel[band].nowIndex = 0;
+    } else {
+      nChannel[band].nowIndex = inRangeInt(0, nChannel[band].chanNum-1, nChannel[band].nowIndex);
     }
+  } else if(readLen > 0) {
+    printf("[NVM/WARN] Unexpected \"%s\" size: %d/%d.\n", bandDbName[band], (int)readLen, (int)sizeof(CHANNEL));
   }
 }
 
 // curFreq*4, curBand, curFilter*2, curVolumn*2, curMute
 void saveBasicPara(void) {
-  lfs_file_t file;
   uint16_t bSet[10] = {0};
   
   uint32_t tmp = 0;
@@ -271,24 +320,17 @@ void saveBasicPara(void) {
   
   if(tmp != cfg_crc) {
     cfg_crc = tmp;
-    
-    lfs_file_open(&lfs, &file, "basicPara", LFS_O_WRONLY | LFS_O_CREAT);
-    lfs_file_write(&lfs, &file, &bSet, sizeof(bSet));
-    lfs_file_close(&lfs, &file);
+    writeConfigFile("basicPara", &bSet, sizeof(bSet));
   }
   
 }
 
 void readBasicPara(void) {
-  lfs_file_t file;
   uint16_t bSet[10] = {0};
+  lfs_ssize_t readLen = 0;
   
-  if(lfs_file_open(&lfs, &file, "basicPara", LFS_O_RDONLY) != 0) {
-    printf("[NVM/ERR] Failed to open \"basicPara\" file.\n");
-  } else {
-    lfs_file_read(&lfs, &file, &bSet, sizeof(bSet));
-    lfs_file_close(&lfs, &file);
-    
+  readLen = readConfigFile("basicPara", &bSet, sizeof(bSet));
+  if(readLen == (lfs_ssize_t)sizeof(bSet)) {
     crc_data_register_reset();
     cfg_crc = crc_block_data_calculate((uint32_t*)bSet, sizeof(bSet)/4);
     
@@ -303,6 +345,8 @@ void readBasicPara(void) {
     sTuner.Audio.nVolume[1]      = bSet[8];
     sTuner.Audio.bMuted          = bSet[9];
     sTuner.Radio.nRFMode = nBandRFMode[sTuner.Radio.nBandMode];
+  } else if(readLen > 0) {
+    printf("[NVM/WARN] Unexpected \"basicPara\" size: %d/%d.\n", (int)readLen, (int)sizeof(bSet));
   }
 }
 
@@ -389,6 +433,33 @@ void VolumeHandler(void)
     }
     keyValue[KEY_RENC] = 0;
   }
+}
+
+static void ApplyAudioOutputByDetect(uint8_t hpDet)
+{
+  if(hpDet == 1)  // headphone plugin
+  {
+    sTuner.Audio.index = 0;
+    gpio_bit_reset(GPIOC, GPIO_PIN_4);
+    gpio_bit_set(GPIOA, GPIO_PIN_6);
+    sTuner.Config.bForceMono = false;
+  }
+  else
+  {
+    sTuner.Audio.index = 1;
+    gpio_bit_reset(GPIOA, GPIO_PIN_6);
+    if(sDevice.bCoaxEnable == false && sDevice.bI2SOutEnable == false)
+      gpio_bit_set(GPIOC, GPIO_PIN_4);
+    else
+      gpio_bit_reset(GPIOC, GPIO_PIN_4);
+    if(sDevice.bAutoMono == true)
+      sTuner.Config.bForceMono = true;
+    else
+      sTuner.Config.bForceMono = false;
+  }
+
+  if(sDevice.bCoaxEnable)
+    SetCoaxOutput(true);
 }
 
 void reFillBackLightTimer(void)
@@ -624,7 +695,7 @@ void SearchAllCH()
 
 void GoChannel(int8_t dir)
 {
-  int8_t index = 0;
+  int16_t index = 0;
   uint8_t flag = 0;
   uint16_t nBandMode = sTuner.Radio.nBandMode;
   
@@ -729,8 +800,19 @@ bool DeleteChannel(uint8_t index)
   // Clear last one & modify Channel Number
   nChannel[nBandMode].chanFreq[nChannel[nBandMode].chanNum-1] = 0;
   nChannel[nBandMode].chanNum--;
-  
-  nChannel[nBandMode].nowIndex = inRangeInt(0, nChannel[nBandMode].chanNum-1, nChannel[nBandMode].nowIndex-1);
+
+  if(nChannel[nBandMode].chanNum == 0)
+  {
+    nChannel[nBandMode].nowIndex = 0;
+  }
+  else if(nChannel[nBandMode].nowIndex > index)
+  {
+    nChannel[nBandMode].nowIndex--;
+  }
+  else if(nChannel[nBandMode].nowIndex >= nChannel[nBandMode].chanNum)
+  {
+    nChannel[nBandMode].nowIndex = nChannel[nBandMode].chanNum-1;
+  }
   return true;
 }
 
@@ -739,7 +821,7 @@ static void MenuChannelManager(void)
   uint8_t band = sTuner.Radio.nBandMode;
   uint16_t fieldFreq = sTuner.Radio.nBandFreq[band];
   
-  int8_t index = 0;
+  int16_t index = 0;
   uint32_t modifyC = 0;
 
   if(nChannel[band].chanNum != 0)
@@ -902,8 +984,8 @@ void MenuDisplay(void)
 void MenuAudio(void)
 {
   // vol, dc, eq, tone
-  const int8_t paraNum[MENU_AUDIO_INDEX] = {0,0,2,0};
-  const int8_t bandNum[MENU_AUDIO_INDEX] = {3,1,9,3};
+	  const int8_t paraNum[MENU_AUDIO_INDEX] = {0,0,2,0,0,0,0,0,0};
+	  const int8_t bandNum[MENU_AUDIO_INDEX] = {3,1,9,3,0,0,0,0,0};
   int8_t index = 0;
   int8_t paraSel = 0;
   int8_t bandSel = 0;
@@ -935,7 +1017,8 @@ void MenuAudio(void)
     if(keyValue[KEY_LENC] != 0)
     {
       keyValue[KEY_LENC] = 0;
-      paraSel = inRangeLoop(0,paraNum[index]-1,paraSel,1);
+      if(paraNum[index] > 0)
+        paraSel = inRangeLoop(0,paraNum[index]-1,paraSel,1);
       UI_Audio(index,bandSel,paraSel,false);
     }
     
@@ -996,19 +1079,23 @@ void MenuAudio(void)
           setTone(sAudioTone, bandSel);
         };break;
         
-        case 4:{ // wave gen
+        case 4:{ // coax out
           
         };break;
         
-        case 5:{ // filter
+	        case 5:{ // i2s out
+	          
+	        };break;
+	        
+	        case 6:{ // filter
           
         };break;
         
-        case 6:{ // ALE
+	        case 7:{ // ALE
           
         };break;
         
-        case 7:{ // UltraBass
+	        case 8:{ // UltraBass
           sAudioKeyFunc.AUBGain = inRangeInt(0,24,sAudioKeyFunc.AUBGain+lcode);
           setUltraBassGain(sAudioKeyFunc.AUBGain);
         };break;
@@ -1020,7 +1107,22 @@ void MenuAudio(void)
     if(keyValue[KEY_OK] != 0)
     {
       keyValue[KEY_OK] = 0;
-      bandSel = inRangeLoop(0,bandNum[index]-1,bandSel,1);
+      if(index == 4)
+      {
+        sDevice.bCoaxEnable = !sDevice.bCoaxEnable;
+        SetCoaxOutput(sDevice.bCoaxEnable);
+        ApplyAudioOutputByDetect(gpio_input_bit_get(GPIOA, GPIO_PIN_7));
+      }
+	      else if(index == 5)
+	      {
+	        sDevice.bI2SOutEnable = !sDevice.bI2SOutEnable;
+	        SetHostI2S0Output(sDevice.bI2SOutEnable);
+          ApplyAudioOutputByDetect(gpio_input_bit_get(GPIOA, GPIO_PIN_7));
+	      }
+      else if(bandNum[index] > 0)
+      {
+        bandSel = inRangeLoop(0,bandNum[index]-1,bandSel,1);
+      }
       UI_Audio(index,bandSel,paraSel,false);
     }
     if(keyValue[KEY_MENU] != 0)
@@ -1178,6 +1280,7 @@ void MenuSearch(void)
 {
   int8_t index = 0;
   uint16_t tmp;
+  bool changed = false;
   
   UI_Search(index,true);
   
@@ -1233,16 +1336,20 @@ void MenuSearch(void)
       {
         case 0:{
           sTuner.ATS.nFMRegion = inRangeInt(0,3,sTuner.ATS.nFMRegion+lcode);
+          changed = true;
         };break;
         case 1:{
           sTuner.ATS.nATSMode = inRangeInt(0,1,sTuner.ATS.nATSMode+lcode);
+          changed = true;
         };break;
         case 2:{
           sTuner.ATS.nSigThreshold = inRangeInt(5,60,sTuner.ATS.nSigThreshold+lcode);
+          changed = true;
         };break;
         case 3:{
           sTuner.ATS.nMWStep = inRangeInt(9,10,sTuner.ATS.nMWStep+lcode);
           nBandStepATS[BAND_MW] = sTuner.ATS.nMWStep;
+          changed = true;
         };break;
         case 4:{
         };break;
@@ -1256,6 +1363,9 @@ void MenuSearch(void)
     
     if(keyValue[KEY_MENU] != 0)
     {
+      if(changed) {
+        saveSettings(CFG_RADIO);
+      }
       flushKey();
       break;
     }
@@ -1440,9 +1550,9 @@ void MenuMain(void)
       switch(index)
       {
         case 0 :MenuDisplay(),saveSettings(CFG_DISP);break;
-        case 1 :MenuAudio(),saveSettings(CFG_AUDIO);break;
+        case 1 :MenuAudio(),saveSettings(CFG_AUDIO),saveSettings(CFG_DEVICE);break;
         case 2 :MenuRadio(),saveSettings(CFG_RADIO);break;//Radio
-        case 3 :MenuSearch(),saveSettings(CFG_RADIO);break;//ATS
+        case 3 :MenuSearch();break;//ATS
         case 4 :MenuDevice(),saveSettings(CFG_DEVICE),saveSettings(CFG_RADIO);break;
         case 5 :MenuAbout();break;
         default : index = 0;break;
@@ -1528,7 +1638,7 @@ int main(void)
       printf("[NVM/WARN] Config version not match! Using default configs\n");
       needUpdate = 1;
     } else {
-      lfs_file_read(&lfs, &file, buffer_u32, 12);
+      lfs_file_read(&lfs, &file, buffer_u32, sizeof(buffer_u32));
       lfs_file_close(&lfs, &file);
       printf("[NVM/INFO] Config version: %d vs %d\n", buffer_u32[0], sDevice.sInfo.pid[0]);
       if(sDevice.sInfo.pid[0] != buffer_u32[0]) {
@@ -1637,24 +1747,9 @@ int main(void)
   RDS_Init(&sRDSData);
   
   nowDET = gpio_input_bit_get(GPIOA,GPIO_PIN_7);
-  if(nowDET == 1)  // headphone plugin
-  {
-    sTuner.Audio.index = 0;
-    gpio_bit_reset(GPIOC, GPIO_PIN_4);
-    gpio_bit_set(GPIOA, GPIO_PIN_6);
-    sTuner.Config.bForceMono = false;
-  }
-  else
-  {
-    sTuner.Audio.index = 1;
-    gpio_bit_reset(GPIOA, GPIO_PIN_6);
-    gpio_bit_set(GPIOC, GPIO_PIN_4);
-    if(sDevice.bAutoMono == true) {
-      sTuner.Config.bForceMono = true;
-    } else {
-      sTuner.Config.bForceMono = false;
-    }
-  }
+  ApplyAudioOutputByDetect(nowDET);
+  SetCoaxOutput(sDevice.bCoaxEnable);
+  SetHostI2S0Output(sDevice.bI2SOutEnable);
   lastDET = nowDET;
   
   SetFMStereoImprovement(sTuner.Config.bFMSI);
@@ -1814,24 +1909,9 @@ int main(void)
       sTuner.Audio.index = 1;
       SetVolume(sTuner.Audio.nVolume[sTuner.Audio.index]);
       nowDET = gpio_input_bit_get(GPIOA,GPIO_PIN_7);
-      if(nowDET == 1)  // headphone plugin
-      {
-        sTuner.Audio.index = 0;
-        gpio_bit_reset(GPIOC, GPIO_PIN_4);
-        gpio_bit_set(GPIOA, GPIO_PIN_6);
-        sTuner.Config.bForceMono = false;
-      }
-      else
-      {
-        sTuner.Audio.index = 1;
-        gpio_bit_reset(GPIOA, GPIO_PIN_6);
-        gpio_bit_set(GPIOC, GPIO_PIN_4);
-        if(sDevice.bAutoMono == true) {
-          sTuner.Config.bForceMono = true;
-        } else {
-          sTuner.Config.bForceMono = false;
-        }
-      }
+      ApplyAudioOutputByDetect(nowDET);
+      SetCoaxOutput(sDevice.bCoaxEnable);
+	      SetHostI2S0Output(sDevice.bI2SOutEnable);
       
       lastDET = nowDET;
       
@@ -1929,22 +2009,7 @@ void TIM_Callback(uint8_t tim)
       nowDET = gpio_input_bit_get(GPIOA,GPIO_PIN_7);
       if(nowDET != lastDET)
       {
-        if(nowDET == 1)  // headphone plugin
-        { 
-          sTuner.Audio.index = 0;
-          gpio_bit_reset(GPIOC, GPIO_PIN_4);
-          gpio_bit_set(GPIOA, GPIO_PIN_6);
-          sTuner.Config.bForceMono = false;
-        }
-        else
-        {
-          sTuner.Audio.index = 1;
-          gpio_bit_reset(GPIOA, GPIO_PIN_6);
-          gpio_bit_set(GPIOC, GPIO_PIN_4);
-          if(sDevice.bAutoMono == true) {
-            sTuner.Config.bForceMono = true;
-          }
-        }
+        ApplyAudioOutputByDetect(nowDET);
         lastDET = nowDET;
       }
     }

@@ -8,6 +8,7 @@
 #include "func.h"
 #include <stdio.h>
 #include <math.h>
+#include <string.h>
 
 /*************************************EXTERN***********************************/
 
@@ -50,12 +51,13 @@ const char menuDetail[6][41] = {
 };
 
 // Audio
-const char audioTitle[8][11] = {
+const char audioTitle[9][11] = {
   {"Vol & Bal"},
   {"DC Block"},
   {"Equalizer"},
   {"Tone"},
-  {"Wave Gen"},
+  {"COAX OUT"},
+	  {"I2S OUT"},
   {"Filter"},
   {"AutoLE"},
   {"UltraBass"},
@@ -162,7 +164,7 @@ void stroffset(uint8_t* str, uint8_t length)
 void UI_DrawScrollBar(uint8_t totalNum, uint8_t nowPos)
 {
   static uint8_t lastPos = 0;
-  char tmp = nowPos;
+  uint16_t tmp = nowPos;
   if(lastPos != nowPos) // clear last pos
     GUI_Line_VH(251, 8+80*lastPos/totalNum, DIR_V, 8, 4, COLOR_WHITE);
   // draw scroll bar
@@ -188,7 +190,38 @@ static void FormatChannelLabel(uint8_t band, uint8_t chIndex, char* text, uint8_
     snprintf(text, textSize, "%02u. %ukHz", chIndex+1, freq);
 }
 
-void UI_ChannelManager(uint8_t band, int8_t index)
+static void DrawMainCounter16(uint16_t xr, uint8_t y, uint16_t value)
+{
+  uint8_t len = 0;
+  uint8_t str[4] = {0};
+
+  len = num2str(value, str);
+  GUI_DrawBuff_Origin(xr, y, 8, 16, img_num16x+32*str[len-1]);
+  if(len >= 2)
+    GUI_DrawBuff_Origin(xr-8, y, 8, 16, img_num16x+32*str[len-2]);
+  else
+    GUI_FillBuff_Origin(xr-8, y, 8, 16, 0x00);
+  if(len >= 3)
+    GUI_DrawBuff_Origin(xr-16, y, 8, 16, img_num16x+32*str[len-3]);
+  else
+    GUI_FillBuff_Origin(xr-16, y, 8, 16, 0x00);
+}
+
+static void DrawMainCounter12(uint16_t x, uint8_t y, uint16_t value)
+{
+  uint8_t len = 0;
+  uint8_t str[4] = {0};
+  char text[4] = {' ', ' ', ' ', 0};
+
+  len = num2str(value, str);
+  stroffset(str, len);
+  memcpy(&text[3-len], str, len);
+
+  GUI_FillBuff(x, y, Font12.Width*3, Font12.Height, COLOR_WHITE);
+  GUI_Text(x, y, x+Font12.Width*3, y+Font12.Height, text, &Font12, COLOR_BLACK, COLOR_WHITE);
+}
+
+void UI_ChannelManager(uint8_t band, int16_t index)
 {
   char line[24] = {0};
   uint8_t total = nChannel[band].chanNum;
@@ -198,12 +231,13 @@ void UI_ChannelManager(uint8_t band, int8_t index)
   uint8_t y = 0;
 
   GUI_ClearBuff(COLOR_WHITE);
-  GUI_Text(62,0,-1,-1,"Manage Memory",&Font20,COLOR_BLACK,COLOR_WHITE);
+  GUI_Text(72,0,184,16,"Manage Memory",&Font16,COLOR_BLACK,COLOR_WHITE);
+  GUI_Text(8,14,246,22,"UP/DN Select  Hold OK Delete",&Font8,COLOR_DARK,COLOR_WHITE);
 
   if(total == 0)
   {
-    GUI_Text(47,36,-1,-1,"No Saved Channel",&Font20,COLOR_BLACK,COLOR_WHITE);
-    GUI_Text(43,60,-1,-1,"-- Press MENU to Back --",&Font12,COLOR_DARK,COLOR_WHITE);
+    GUI_Text(44,38,220,58,"No saved channel",&Font20,COLOR_BLACK,COLOR_WHITE);
+    GUI_Text(78,68,210,80,"MENU Back",&Font12,COLOR_DARK,COLOR_WHITE);
     GUI_FillBuff(248,0,8,96,COLOR_WHITE);
     return;
   }
@@ -540,7 +574,7 @@ void UI_Main(bool init)
     GUI_DrawBuff_Origin(238,80,16,16,img_degree);
     
     if(sDisplay.emiFree == true) {
-      GUI_DrawBuff_Origin(124,80,16,16,img_channel);
+      GUI_DrawBuff_Origin(114,80,16,16,img_channel);
       GUI_DrawBuff_Origin(156,80,8,16,img_num16x+352);
       
       GUI_DrawBuff_Origin(64,72,126,8,img_scale);
@@ -724,20 +758,13 @@ void UI_Main(bool init)
     
     if(sDisplay.emiFree == true)
     {
-      GUI_DrawBuff_Origin(140,80,8,16,img_num16x+32*((vchan+1)/10));
-      GUI_DrawBuff_Origin(148,80,8,16,img_num16x+32*((vchan+1)%10));
-      
-      GUI_DrawBuff_Origin(164,80,8,16,img_num16x+32*(vchannum/10));
-      GUI_DrawBuff_Origin(172,80,8,16,img_num16x+32*(vchannum%10));
+      DrawMainCounter16(148, 80, vchan+1);
+      DrawMainCounter16(180, 80, vchannum);
     }
     else
     {
-      //GUI_FillBuff_Origin(0,48,36,16,COLOR_WHITE);
-      GUI_Char(22,50,((vchan+1)/10)+'0',&Font12,COLOR_BLACK,COLOR_WHITE);
-      GUI_Char(29,50,((vchan+1)%10)+'0',&Font12,COLOR_BLACK,COLOR_WHITE);
-      
-      GUI_Char(43,50,(vchannum/10)+'0',&Font12,COLOR_BLACK,COLOR_WHITE);
-      GUI_Char(50,50,(vchannum%10)+'0',&Font12,COLOR_BLACK,COLOR_WHITE);
+      DrawMainCounter12(15, 50, vchan+1);
+      DrawMainCounter12(43, 50, vchannum);
     }
   }
   
@@ -1005,19 +1032,23 @@ void UI_Audio(int8_t index, int8_t band, int8_t sel, bool init)
         UI_DrawTone(band);
       };break;
       
-      case 4:{ // wave gen
+      case 4:{ // coax out
+        UI_DrawCheckBox(1,img_commonSet20x,"Coax Output",true,sDevice.bCoaxEnable);
+      };break;
+      
+	      case 5:{ // i2s out
+	        UI_DrawCheckBox(1,img_commonSet20x,"Host I2S0 Out",true,sDevice.bI2SOutEnable);
+	      };break;
+	      
+	      case 6:{ // filter
         
       };break;
       
-      case 5:{ // filter
+	      case 7:{ // ALE
         
       };break;
       
-      case 6:{ // ALE
-        
-      };break;
-      
-      case 7:{ // Ultra Bass
+	      case 8:{ // Ultra Bass
         GUI_DrawBuff(8,24+2,44,44,MODE_GREY,0,0,img_ultraBass44x44);
         GUI_Text(8+44+8, 24+2, 256,24+2+20,"Adaptive UltraBass",&Font20,COLOR_BLACK,COLOR_WHITE);
         GUI_Text(8+44+8, 48+2, 256,48+2+20,"[0 ~ 24] 1dB/div",&Font20,COLOR_BLACK,COLOR_WHITE);
@@ -1048,19 +1079,23 @@ void UI_Audio(int8_t index, int8_t band, int8_t sel, bool init)
       UI_DrawTone(band);
     };break;
     
-    case 4:{ // wave gen
+    case 4:{ // coax out
+      UI_DrawCheckBox(1,img_commonSet20x,"Coax Output",true,sDevice.bCoaxEnable);
+    };break;
+    
+	    case 5:{ // i2s out
+	      UI_DrawCheckBox(1,img_commonSet20x,"Host I2S0 Out",true,sDevice.bI2SOutEnable);
+	    };break;
+	    
+	    case 6:{ // filter
       
     };break;
     
-    case 5:{ // filter
+	    case 7:{ // ALE
       
     };break;
     
-    case 6:{ // ALE
-      
-    };break;
-    
-    case 7:{ // UltraBass
+	    case 8:{ // UltraBass
       UI_DrawFloat(72,sAudioKeyFunc.AUBGain,1,"dB");
     };break;
   }

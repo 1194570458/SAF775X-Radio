@@ -27,7 +27,7 @@ void UI_Display(int8_t index, bool init);
 void UI_Audio(int8_t index, int8_t band, int8_t sel, bool init);
 void UI_Radio(int8_t index, bool init);
 void UI_Search(int8_t index, bool init);
-void UI_ChannelManager(uint8_t band, int8_t index);
+void UI_ChannelManager(uint8_t band, int16_t index);
 void UI_Device(int8_t index, bool init);
 void UI_About(int8_t index, bool init);
 

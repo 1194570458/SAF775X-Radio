@@ -38,8 +38,9 @@
 // Channels in band
 #define CHS_LW       20
 #define CHS_MW       50
-#define CHS_SW      100
-#define CHS_FM      100
+#define CHS_FM      150
+#define CHS_SW      200
+#define CHS_MAX     200  // largest preset capacity across all bands
 
 // Tuning Mode
 #define Preset        1
@@ -203,6 +204,8 @@ void SwitchBand(uint8_t band);
 
 void TunerStructInit(struct Dirana3Radio* init, bool initPara);
 void TunerInit(void);
+void SetCoaxOutput(bool on);
+void SetHostI2S0Output(bool on);
 
 
 
